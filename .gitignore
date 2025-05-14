@@ -1,0 +1,60 @@
+# 機密情報
+keys/
+credentials/
+.env
+*.pem
+*.key
+*_key.json
+
+# Python関連
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code設定 (すべて除外)
+.vscode/
+
+# データファイル
+data/raw/
+data/processed/
+*.csv
+*.xlsx
+*.xls
+*.parquet
+*.h5
+
+# ログファイル
+logs/
+*.log
+
+# システム関連
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 仮想環境
+venv/
+env/
+ENV/
+.env/
+.venv/
