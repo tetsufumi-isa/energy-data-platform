@@ -40,22 +40,23 @@ def test_single_file_upload(uploader):
     """単一ファイルアップロードテスト"""
     print_test_header("単一ファイルアップロードテスト")
     
-    # テスト用ファイルを作成
-    test_file = "test_upload.txt"
-    test_content = "これはGCSアップロードのテストファイルです。"
+    # 既存のCSVファイルを使用
+    test_file = "data/raw/202504/20250401_power_usage.csv"
     
     try:
-        # テストファイル作成
-        with open(test_file, 'w', encoding='utf-8') as f:
-            f.write(test_content)
-        print_result(True, f"テストファイル作成: {test_file}")
+        # ファイル存在確認
+        if not os.path.exists(test_file):
+            print_result(False, f"テストファイルが存在しません: {test_file}")
+            return
+        
+        print_result(True, f"テストファイル確認: {test_file}")
         
         # destination_blob_name未指定でアップロード
         uri1 = uploader.upload_file(test_file)
         print_result(True, f"アップロード完了（自動命名）: {uri1}")
         
         # destination_blob_name指定でアップロード
-        uri2 = uploader.upload_file(test_file, "test/custom_name.txt")
+        uri2 = uploader.upload_file(test_file, "test/20250401_custom_name.csv")
         print_result(True, f"アップロード完了（カスタム名）: {uri2}")
         
         # URIの形式確認
@@ -66,11 +67,6 @@ def test_single_file_upload(uploader):
         
     except Exception as e:
         print_result(False, f"アップロードエラー: {e}")
-    finally:
-        # テストファイルを削除
-        if os.path.exists(test_file):
-            os.remove(test_file)
-            print_result(True, "テストファイル削除完了")
 
 def test_directory_upload_no_filter(uploader):
     """ディレクトリアップロードテスト（フィルタなし）"""
