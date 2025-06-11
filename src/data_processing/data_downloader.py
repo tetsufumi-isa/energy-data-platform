@@ -63,6 +63,7 @@ class PowerDataDownloader:
         Returns:
             set: 月の文字列セット
         """
+        
         try:
             date = datetime.strptime(date_str, '%Y%m%d')
             month = date.strftime('%Y%m')
@@ -155,6 +156,13 @@ class PowerDataDownloader:
         Returns:
             dict: ダウンロード結果
         """
+
+        # 月フォーマットの事前チェック
+        try:
+            datetime.strptime(yyyymm, '%Y%m')
+        except ValueError:
+            raise ValueError(f"Month must be in YYYYMM format: {yyyymm}")
+    
         results = {'success': [], 'failed': []}
         
         try:
