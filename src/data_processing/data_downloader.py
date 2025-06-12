@@ -63,15 +63,20 @@ class PowerDataDownloader:
         Returns:
             set: 月の文字列セット
         """
-        
         try:
             date = datetime.strptime(date_str, '%Y%m%d')
-            month = date.strftime('%Y%m')
-            logger.info(f"Month for date {date_str}: {month}")
-            return {month}
         except ValueError as e:
             logger.error(f"Invalid date format {date_str}: {e}")
-            raise ValueError(f"Date must be in YYYYMMDD format: {date_str}")
+            raise ValueError(f"日付はYYYYMMDD形式で入力してください: {date_str}")
+        
+        # 未来日付チェック
+        if date.date() > datetime.today().date():
+            today_str = datetime.today().strftime('%Y%m%d')
+            raise ValueError(f"未来の日付は指定できません: {date_str} (今日: {today_str})")
+        
+        month = date.strftime('%Y%m')
+        logger.info(f"Month for date {date_str}: {month}")
+        return {month}
     
     def download_month_data(self, yyyymm):
         """
@@ -156,13 +161,18 @@ class PowerDataDownloader:
         Returns:
             dict: ダウンロード結果
         """
-
         # 月フォーマットの事前チェック
         try:
-            datetime.strptime(yyyymm, '%Y%m')
+            month_date = datetime.strptime(yyyymm, '%Y%m')
         except ValueError:
-            raise ValueError(f"Month must be in YYYYMM format: {yyyymm}")
-    
+            raise ValueError(f"月はYYYYMM形式で入力してください: {yyyymm}")
+        
+        # 未来月チェック
+        current_month = datetime.today().replace(day=1)
+        if month_date > current_month:
+            current_month_str = current_month.strftime('%Y%m')
+            raise ValueError(f"未来の月は指定できません: {yyyymm} (今月: {current_month_str})")
+
         results = {'success': [], 'failed': []}
         
         try:
