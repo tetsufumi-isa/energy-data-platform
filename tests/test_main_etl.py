@@ -12,7 +12,7 @@ MainETLPipeline 手動テストスクリプト
 import os
 from datetime import datetime, timedelta
 
-from src.main_etl import MainETLPipeline
+from src.pipelines.main_etl import MainETLPipeline
 from src.utils.logging_config import setup_logging
 
 def print_test_header(test_name):
