@@ -41,7 +41,7 @@ def test_single_file_upload(uploader):
     print_test_header("単一ファイルアップロードテスト")
     
     # 既存のCSVファイルを使用
-    test_file = "data/raw/202504/20250401_power_usage.csv"
+    test_file = "data/raw/202504/20250401_hourly.csv"
     
     try:
         # ファイル存在確認
