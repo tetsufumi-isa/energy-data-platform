@@ -42,6 +42,7 @@ data/processed/
 *.xls
 *.parquet
 *.h5
+*.json
 
 # ログファイル
 logs/
