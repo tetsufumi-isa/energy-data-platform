@@ -1,9 +1,14 @@
 """
-気象データ変換プロセッサー - JSON→CSV変換・BigQuery投入準備
+気象データ変換プロセッサー - JSON→CSV変換・GCSアップロード
 
 実行方法:
+    # CSV変換のみ
     python -m src.data_processing.weather_processor --input-dir data/weather/raw/historical
-    python -m src.data_processing.weather_processor --input-dir data/weather/raw/historical --date 2025-07-13
+    
+    # CSV変換 + GCSアップロード
+    python -m src.data_processing.weather_processor \
+        --input-dir data/weather/raw/historical \
+        --upload-to-gcs
 """
 
 import os
@@ -15,6 +20,7 @@ from pathlib import Path
 from logging import getLogger
 
 from src.utils.logging_config import setup_logging
+from src.data_processing.gcs_uploader import GCSUploader
 
 # モジュール専用のロガーを取得
 logger = getLogger('energy_env.data_processing.weather_processor')
@@ -28,16 +34,22 @@ class WeatherProcessor:
         'tochigi', 'gunma', 'yamanashi', 'shizuoka'
     ]
     
-    def __init__(self, output_dir="data/weather/processed/forecast"):
+    def __init__(self, output_dir="data/weather/processed/forecast", bucket_name="energy-env-data"):
         """
         初期化
         
         Args:
             output_dir (str): CSV出力先ディレクトリ
+            bucket_name (str): GCSバケット名
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"WeatherProcessor initialized with output_dir: {self.output_dir}")
+        
+        # GCSアップロード機能追加
+        self.bucket_name = bucket_name
+        self.gcs_uploader = GCSUploader(bucket_name)
+        
+        logger.info(f"WeatherProcessor initialized with output_dir: {self.output_dir}, bucket: {bucket_name}")
     
     def convert_json_to_csv(self, json_file_path, date_filter=None):
         """
@@ -207,6 +219,45 @@ class WeatherProcessor:
                 })
         
         return results
+    
+    def upload_to_gcs(self, csv_files, gcs_prefix="weather_processed/forecast"):
+        """
+        CSVファイルをGCSにアップロード
+        
+        Args:
+            csv_files (list): CSVファイルパスのリスト
+            gcs_prefix (str): GCS上のプレフィックス
+            
+        Returns:
+            dict: アップロード結果 {'success': [...], 'failed': [...]}
+        """
+        if not csv_files:
+            logger.warning("No CSV files to upload")
+            return {'success': [], 'failed': []}
+        
+        results = {'success': [], 'failed': []}
+        
+        for csv_file in csv_files:
+            try:
+                csv_path = Path(csv_file)
+                gcs_file_name = f"{gcs_prefix}/{csv_path.name}"
+                
+                uri = self.gcs_uploader.upload_file(str(csv_path), gcs_file_name)
+                results['success'].append({
+                    'local_file': str(csv_path),
+                    'gcs_uri': uri
+                })
+                logger.info(f"GCSアップロード成功: {csv_path.name} → {uri}")
+                
+            except Exception as e:
+                logger.error(f"GCSアップロード失敗 {csv_file}: {e}")
+                results['failed'].append({
+                    'local_file': str(csv_file),
+                    'error': str(e)
+                })
+        
+        logger.info(f"GCSアップロード完了: 成功{len(results['success'])}件, 失敗{len(results['failed'])}件")
+        return results
 
 
 def print_results(results):
@@ -238,12 +289,40 @@ def print_results(results):
     print('='*60)
 
 
+def print_gcs_results(results):
+    """GCSアップロード結果を表示"""
+    success_count = len(results['success'])
+    failed_count = len(results['failed'])
+    
+    print(f"\n{'='*60}")
+    print("📤 GCSアップロード結果")
+    print('='*60)
+    
+    if results['success']:
+        print(f"\n✅ 成功: {success_count}ファイル")
+        for item in results['success']:
+            file_name = Path(item['local_file']).name
+            print(f"  {file_name} → {item['gcs_uri']}")
+    
+    if results['failed']:
+        print(f"\n❌ 失敗: {failed_count}ファイル")
+        for item in results['failed']:
+            file_name = Path(item['local_file']).name
+            print(f"  {file_name}: {item['error']}")
+    
+    if success_count == 0 and failed_count == 0:
+        print("📝 アップロード対象がありませんでした")
+    
+    print(f"\n📈 GCSアップロード総合結果: 成功{success_count}件 / 失敗{failed_count}件")
+    print('='*60)
+
+
 def main():
     """メイン関数"""
     # ログ設定を初期化
     setup_logging()
     
-    parser = argparse.ArgumentParser(description='気象データ変換プロセッサー (JSON→CSV)')
+    parser = argparse.ArgumentParser(description='気象データ変換プロセッサー (JSON→CSV + GCSアップロード)')
     parser.add_argument('--input-dir', type=str, 
                        default='data/weather/raw/forecast',
                        help='入力ディレクトリパス (デフォルト: data/weather/raw/forecast)')
@@ -251,6 +330,8 @@ def main():
                        help='特定日付のみ処理 (YYYY-MM-DD形式)')
     parser.add_argument('--output-dir', type=str, default='data/weather/processed/forecast',
                        help='出力ディレクトリパス (デフォルト: data/weather/processed/forecast)')
+    parser.add_argument('--upload-to-gcs', action='store_true',
+                       help='CSV変換後にGCSへアップロード')
     
     args = parser.parse_args()
     
@@ -270,20 +351,46 @@ def main():
     print(f"📂 出力ディレクトリ: {args.output_dir}")
     if args.date:
         print(f"📅 日付フィルタ: {args.date}")
+    if args.upload_to_gcs:
+        print(f"📤 GCSアップロード: 有効")
     
     try:
-        # 変換処理実行
+        # CSV変換処理実行
         results = processor.process_directory(args.input_dir, args.date)
         
-        # 結果表示
+        # CSV変換結果表示
         print_results(results)
+        
+        # GCSアップロード処理
+        if args.upload_to_gcs:
+            print("\n🔼 GCSアップロード開始")
+            
+            # 成功したCSVファイルリストを取得
+            csv_files = [item['output'] for item in results['success']]
+            
+            if csv_files:
+                # GCSプレフィックス自動判定（入力ディレクトリから）
+                if "historical" in args.input_dir:
+                    gcs_prefix = "weather_processed/historical"
+                else:
+                    gcs_prefix = "weather_processed/forecast"
+                
+                print(f"📁 GCSプレフィックス: {gcs_prefix}")
+                
+                # GCSアップロード実行
+                gcs_results = processor.upload_to_gcs(csv_files, gcs_prefix)
+                
+                # GCSアップロード結果表示
+                print_gcs_results(gcs_results)
+            else:
+                print("📝 アップロード対象のCSVファイルがありません")
         
     except Exception as e:
         logger.error(f"Weather processing failed: {e}")
         print(f"💥 処理エラー: {e}")
         return
     
-    print("🏁 気象データ変換完了")
+    print("🏁 気象データ処理完了")
 
 
 if __name__ == "__main__":
