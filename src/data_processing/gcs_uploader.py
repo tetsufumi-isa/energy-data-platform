@@ -195,13 +195,14 @@ class GCSUploader:
                         # 時刻の抽出（"13:00" → 13）
                         time_str = parts[1].strip()
                         hour = int(time_str.split(':')[0])
-                        
+                        hour_str = str(hour).zfill(2)  # 追加：2桁ゼロ埋め
+
                         # データの抽出
                         actual_power = float(parts[2])
                         supply_capacity = float(parts[5])
                         
                         # BigQuery用行データ作成
-                        output_line = f"{formatted_date},{hour},{actual_power},{supply_capacity}"
+                        output_line = f"{formatted_date},{hour_str},{actual_power},{supply_capacity}"
                         output_lines.append(output_line)
                         processed_count += 1
                         
