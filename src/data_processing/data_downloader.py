@@ -26,13 +26,20 @@ class PowerDataDownloader:
     
     BASE_URL = "https://www.tepco.co.jp/forecast/html/images"
     
-    def __init__(self, base_dir="data/raw"):
+    def __init__(self, base_dir=None):
         """
         初期化
         
         Args:
             base_dir (str): データ保存先のベースディレクトリ
+                          Noneの場合は環境変数ENERGY_ENV_PATHから取得
         """
+        if base_dir is None:
+            energy_env_path = os.getenv('ENERGY_ENV_PATH')
+            if energy_env_path is None:
+                raise ValueError("ENERGY_ENV_PATH environment variable is not set")
+            base_dir = os.path.join(energy_env_path, 'data', 'raw')
+        
         self.base_dir = Path(base_dir)
         logger.info(f"PowerDataDownloader initialized with base_dir: {self.base_dir}")
     
@@ -229,6 +236,14 @@ def main():
     # ログ設定を初期化
     setup_logging()
     
+    # デフォルトのbase_dirを環境変数から取得
+    energy_env_path = os.getenv('ENERGY_ENV_PATH')
+    if energy_env_path is None:
+        default_base_dir = 'data/raw'  # 環境変数が設定されていない場合のフォールバック
+        print("⚠️  警告: ENERGY_ENV_PATH環境変数が設定されていません。相対パスを使用します。")
+    else:
+        default_base_dir = os.path.join(energy_env_path, 'data', 'raw')
+    
     parser = argparse.ArgumentParser(description='東京電力でんき予報データダウンローダー')
     parser.add_argument('--days', type=int, default=5, 
                        help='今日から遡る日数 (デフォルト: 5)')
@@ -236,8 +251,8 @@ def main():
                        help='指定月をダウンロード (YYYYMM形式)')
     parser.add_argument('--date', type=str, 
                        help='特定日をダウンロード (YYYYMMDD形式)')
-    parser.add_argument('--base-dir', type=str, default='data/raw',
-                       help='保存先ディレクトリ (デフォルト: data/raw)')
+    parser.add_argument('--base-dir', type=str, default=default_base_dir,
+                       help=f'保存先ディレクトリ (デフォルト: {default_base_dir})')
     
     args = parser.parse_args()
     
@@ -254,9 +269,15 @@ def main():
         return
     
     # ダウンローダー初期化
-    downloader = PowerDataDownloader(args.base_dir)
+    try:
+        downloader = PowerDataDownloader(args.base_dir)
+    except ValueError as e:
+        print(f"❌ エラー: {e}")
+        print("   ENERGY_ENV_PATH環境変数を設定してください")
+        return
     
     print("🚀 東京電力でんき予報データダウンロード開始")
+    print(f"📂 保存先: {downloader.base_dir}")
     
     # 実行モード判定とダウンロード実行
     if args.month:

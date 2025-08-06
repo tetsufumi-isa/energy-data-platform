@@ -2,13 +2,14 @@
 メインETLパイプライン - データダウンロード→GCSアップロード統合処理
 
 実行方法:
-    python -m src.main_etl                    # デフォルト: 過去5日分
-    python -m src.main_etl --days 7          # 過去7日分
-    python -m src.main_etl --month 202505    # 指定月
-    python -m src.main_etl --date 20250501   # 特定日
-    python -m src.main_etl --bucket my-bucket # カスタムバケット
+    python -m src.pipelines.main_etl                    # デフォルト: 過去5日分
+    python -m src.pipelines.main_etl --days 7          # 過去7日分
+    python -m src.pipelines.main_etl --month 202505    # 指定月
+    python -m src.pipelines.main_etl --date 20250501   # 特定日
+    python -m src.pipelines.main_etl --bucket my-bucket # カスタムバケット
 """
 
+import os
 import argparse
 import calendar
 from datetime import datetime, timedelta
@@ -25,14 +26,21 @@ logger = getLogger('energy_env.main_etl')
 class MainETLPipeline:
     """メインETLパイプライン - Extract + Load統合処理"""
     
-    def __init__(self, base_dir="data/raw", bucket_name="energy-env-data"):
+    def __init__(self, base_dir=None, bucket_name="energy-env-data"):
         """
         初期化
         
         Args:
             base_dir (str): ローカルデータ保存先
+                          Noneの場合は環境変数ENERGY_ENV_PATHから取得
             bucket_name (str): GCSバケット名
         """
+        if base_dir is None:
+            energy_env_path = os.getenv('ENERGY_ENV_PATH')
+            if energy_env_path is None:
+                raise ValueError("ENERGY_ENV_PATH environment variable is not set")
+            base_dir = os.path.join(energy_env_path, 'data', 'raw')
+        
         self.base_dir = Path(base_dir)
         self.bucket_name = bucket_name
         
@@ -63,8 +71,7 @@ class MainETLPipeline:
             return {
                 'download_results': download_results,
                 'upload_results': {'success': [], 'failed': []},
-                'overall_status': 'failed',
-                'message': 'ダウンロードに失敗したため、アップロードをスキップしました'
+                'summary': 'Failed: No data downloaded'
             }
         
         # Phase 2: Load (GCSアップロード)
@@ -72,13 +79,13 @@ class MainETLPipeline:
         upload_results = self._upload_downloaded_data(download_results['success'])
         
         # 結果サマリー作成
-        overall_status = 'success' if download_results['success'] and upload_results['success'] else 'partial'
+        summary = self._create_summary(download_results, upload_results)
+        logger.info(f"ETL pipeline completed: {summary}")
         
         return {
             'download_results': download_results,
             'upload_results': upload_results,
-            'overall_status': overall_status,
-            'message': self._create_summary_message(download_results, upload_results)
+            'summary': summary
         }
     
     def run_etl_for_month(self, yyyymm):
@@ -102,8 +109,7 @@ class MainETLPipeline:
             return {
                 'download_results': download_results,
                 'upload_results': {'success': [], 'failed': []},
-                'overall_status': 'failed',
-                'message': f'月{yyyymm}のダウンロードに失敗したため、アップロードをスキップしました'
+                'summary': f'Failed: No data downloaded for {yyyymm}'
             }
         
         # Phase 2: Load
@@ -111,18 +117,18 @@ class MainETLPipeline:
         upload_results = self._upload_downloaded_data(download_results['success'])
         
         # 結果サマリー作成
-        overall_status = 'success' if download_results['success'] and upload_results['success'] else 'partial'
+        summary = self._create_summary(download_results, upload_results)
+        logger.info(f"ETL pipeline completed: {summary}")
         
         return {
             'download_results': download_results,
             'upload_results': upload_results,
-            'overall_status': overall_status,
-            'message': self._create_summary_message(download_results, upload_results)
+            'summary': summary
         }
     
     def run_etl_for_date(self, date_str):
         """
-        日付指定でETLパイプラインを実行
+        特定日でETLパイプラインを実行
         
         Args:
             date_str (str): 日付文字列 (YYYYMMDD形式)
@@ -141,8 +147,7 @@ class MainETLPipeline:
             return {
                 'download_results': download_results,
                 'upload_results': {'success': [], 'failed': []},
-                'overall_status': 'failed',
-                'message': f'日付{date_str}のダウンロードに失敗したため、アップロードをスキップしました'
+                'summary': f'Failed: No data downloaded for {date_str}'
             }
         
         # Phase 2: Load
@@ -150,18 +155,18 @@ class MainETLPipeline:
         upload_results = self._upload_downloaded_data(download_results['success'])
         
         # 結果サマリー作成
-        overall_status = 'success' if download_results['success'] and upload_results['success'] else 'partial'
+        summary = self._create_summary(download_results, upload_results)
+        logger.info(f"ETL pipeline completed: {summary}")
         
         return {
             'download_results': download_results,
             'upload_results': upload_results,
-            'overall_status': overall_status,
-            'message': self._create_summary_message(download_results, upload_results)
+            'summary': summary
         }
     
     def _upload_downloaded_data(self, successful_months):
         """
-        ダウンロードされたデータをGCSにアップロード
+        ダウンロード済みデータをGCSにアップロード
         
         Args:
             successful_months (list): ダウンロード成功した月のリスト
@@ -172,176 +177,103 @@ class MainETLPipeline:
         upload_results = {'success': [], 'failed': []}
         
         for month in successful_months:
-            month_dir = self.base_dir / month
-            
-            if not month_dir.exists():
-                logger.warning(f"Directory not found: {month_dir}")
-                upload_results['failed'].append(month)
-                continue
-            
             try:
-                # 月ディレクトリ内のCSVとZIPをアップロード
-                destination_prefix = f"raw_data/{month}"
+                month_dir = self.base_dir / month
                 
-                # CSVファイルをアップロード
-                csv_uris = self.uploader.upload_directory(
-                    str(month_dir), 
-                    destination_prefix,
-                    file_extension=".csv"
-                )
+                # CSV ファイルを検索
+                csv_files = list(month_dir.glob("*.csv"))
                 
-                # ZIPファイルを日付付きでバックアップアップロード
-                today_str = datetime.today().strftime('%Y-%m-%d')
-                zip_uris = self.uploader.upload_directory(
-                    str(month_dir),
-                    f"archives/{month}/{today_str}",  # 日付付きパス
-                    file_extension=".zip"
-                )
+                if not csv_files:
+                    logger.warning(f"No CSV files found in {month_dir}")
+                    upload_results['failed'].append({
+                        'month': month,
+                        'error': 'No CSV files found'
+                    })
+                    continue
                 
-                uploaded_uris = csv_uris + zip_uris
+                # 各CSVファイルをアップロード
+                month_success = True
+                for csv_file in csv_files:
+                    try:
+                        gcs_file_name = f"raw_data/{month}/{csv_file.name}"
+                        uri = self.uploader.upload_file(str(csv_file), gcs_file_name)
+                        logger.info(f"Successfully uploaded {csv_file.name} to {uri}")
+                    except Exception as e:
+                        logger.error(f"Failed to upload {csv_file}: {e}")
+                        month_success = False
                 
-                # 古いZIPバージョンをクリーンアップ
-                self._cleanup_old_zip_versions()
-                
-                logger.info(f"Uploaded {len(uploaded_uris)} files for month {month}")
-                upload_results['success'].append(month)
-                
+                if month_success:
+                    upload_results['success'].append(month)
+                else:
+                    upload_results['failed'].append({
+                        'month': month,
+                        'error': 'One or more CSV files failed to upload'
+                    })
+                    
             except Exception as e:
-                logger.error(f"Failed to upload data for month {month}: {e}")
-                upload_results['failed'].append(month)
+                logger.error(f"Failed to process month {month}: {e}")
+                upload_results['failed'].append({
+                    'month': month,
+                    'error': str(e)
+                })
         
         return upload_results
     
-    def _cleanup_old_zip_versions(self):
+    def _create_summary(self, download_results, upload_results):
         """
-        古いZIPバージョンをクリーンアップ
-        今月と先月のアーカイブから2週間より古い（月末除く）ZIPファイルを削除
-        """
-        try:
-            execution_date = datetime.today()
-            cutoff_date = execution_date - timedelta(days=14)
-            
-            # 今月と先月をチェック
-            current_month = execution_date.strftime('%Y%m')
-            previous_month = (execution_date.replace(day=1) - timedelta(days=1)).strftime('%Y%m')
-            
-            months_to_check = {current_month, previous_month}
-            
-            logger.info(f"Starting ZIP cleanup for months: {sorted(months_to_check)}")
-            
-            total_deleted = 0
-            total_kept = 0
-            
-            for month in months_to_check:
-                # GCS上のZIPファイル一覧を取得
-                archive_prefix = f"archives/{month}/"
-                blobs = list(self.uploader.client.list_blobs(
-                    self.uploader.bucket, 
-                    prefix=archive_prefix
-                ))
-                
-                if not blobs:
-                    continue
-                    
-                deleted_count = 0
-                kept_count = 0
-                
-                for blob in blobs:
-                    if not blob.name.endswith('.zip'):
-                        continue
-                        
-                    # ファイルパスから日付を抽出: archives/202506/2025-06-01/202506.zip
-                    path_parts = blob.name.split('/')
-                    if len(path_parts) < 3:
-                        continue
-                        
-                    date_str = path_parts[2]  # "2025-06-01"
-                    
-                    try:
-                        file_date = datetime.strptime(date_str, '%Y-%m-%d')
-                    except ValueError:
-                        continue  # 日付形式でない場合はスキップ
-                    
-                    # 削除判定と実行
-                    # 基準日より古く、かつ月末日でない場合は削除
-                    last_day_of_month = calendar.monthrange(file_date.year, file_date.month)[1]
-                    if (file_date < cutoff_date and file_date.day != last_day_of_month):
-                        blob.delete()
-                        logger.info(f"Deleted old ZIP: {blob.name}")
-                        deleted_count += 1
-                    else:
-                        kept_count += 1
-                
-                if deleted_count > 0:
-                    logger.info(f"Month {month}: deleted {deleted_count} old ZIPs, kept {kept_count} ZIPs")
-                
-                total_deleted += deleted_count
-                total_kept += kept_count
-            
-            if total_deleted > 0:
-                logger.info(f"ZIP cleanup completed: deleted {total_deleted} files, kept {total_kept} files")
-                
-        except Exception as e:
-            logger.warning(f"ZIP cleanup failed: {e}")
-            # クリーンアップ失敗は全体の処理を止めない
-    
-    def _create_summary_message(self, download_results, upload_results):
-        """
-        実行結果のサマリーメッセージを作成
+        実行結果のサマリーを作成
         
         Args:
             download_results (dict): ダウンロード結果
             upload_results (dict): アップロード結果
             
         Returns:
-            str: サマリーメッセージ
+            str: サマリー文字列
         """
-        dl_success = len(download_results['success'])
-        dl_failed = len(download_results['failed'])
-        up_success = len(upload_results['success'])
-        up_failed = len(upload_results['failed'])
+        download_success = len(download_results['success'])
+        download_failed = len(download_results['failed'])
+        upload_success = len(upload_results['success'])
+        upload_failed = len(upload_results['failed'])
         
-        if dl_success == 0:
-            return "すべてのダウンロードに失敗しました"
-        elif up_success == dl_success:
-            return f"ETL完全成功: {dl_success}月分のデータを処理しました"
-        elif up_success > 0:
-            return f"ETL部分成功: ダウンロード{dl_success}月, アップロード{up_success}月"
+        if download_failed == 0 and upload_failed == 0:
+            return f"Success: {download_success} months downloaded and uploaded"
+        elif download_failed > 0 and upload_failed == 0:
+            return f"Partial Success: {download_success} downloaded, {download_failed} download failed"
+        elif download_failed == 0 and upload_failed > 0:
+            return f"Partial Success: {download_success} downloaded, {upload_failed} upload failed"
         else:
-            return f"ダウンロード成功({dl_success}月)、アップロード失敗"
+            return f"Partial Success: {download_success} completed, {download_failed} download failed, {upload_failed} upload failed"
 
 
-def print_etl_results(results):
-    """ETL実行結果を表示"""
+def print_results(results):
+    """実行結果を表示"""
     print(f"\n{'='*60}")
     print("📊 ETLパイプライン実行結果")
     print('='*60)
     
     # ダウンロード結果
-    print("\n🔽 Extract (ダウンロード)")
-    dl_results = results['download_results']
-    if dl_results['success']:
-        print(f"✅ 成功: {', '.join(dl_results['success'])}")
-    if dl_results['failed']:
-        print(f"❌ 失敗: {', '.join(dl_results['failed'])}")
+    download_results = results['download_results']
+    print("\n📥 データダウンロード結果:")
+    if download_results['success']:
+        print(f"  ✅ 成功: {', '.join(download_results['success'])}")
+    if download_results['failed']:
+        print(f"  ❌ 失敗: {', '.join(download_results['failed'])}")
     
     # アップロード結果
-    print("\n🔼 Load (アップロード)")
-    up_results = results['upload_results']
-    if up_results['success']:
-        print(f"✅ 成功: {', '.join(up_results['success'])}")
-    if up_results['failed']:
-        print(f"❌ 失敗: {', '.join(up_results['failed'])}")
+    upload_results = results['upload_results']
+    print("\n📤 GCSアップロード結果:")
+    if upload_results['success']:
+        print(f"  ✅ 成功: {', '.join(upload_results['success'])}")
+    if upload_results['failed']:
+        print("  ❌ 失敗:")
+        for item in upload_results['failed']:
+            if isinstance(item, dict):
+                print(f"    {item['month']}: {item['error']}")
+            else:
+                print(f"    {item}")
     
-    # 総合結果
-    status_emoji = {
-        'success': '🎉',
-        'partial': '⚠️',
-        'failed': '💥'
-    }
-    
-    print(f"\n📋 総合結果")
-    print(f"{status_emoji[results['overall_status']]} {results['message']}")
+    # サマリー
+    print(f"\n📈 総合結果: {results['summary']}")
     print('='*60)
 
 
@@ -350,40 +282,54 @@ def main():
     # ログ設定を初期化
     setup_logging()
     
-    parser = argparse.ArgumentParser(description='メインETLパイプライン - データダウンロード→GCSアップロード')
+    # デフォルトのbase_dirを環境変数から取得
+    energy_env_path = os.getenv('ENERGY_ENV_PATH')
+    if energy_env_path is None:
+        default_base_dir = 'data/raw'  # 環境変数が設定されていない場合のフォールバック
+        print("⚠️  警告: ENERGY_ENV_PATH環境変数が設定されていません。相対パスを使用します。")
+    else:
+        default_base_dir = os.path.join(energy_env_path, 'data', 'raw')
+    
+    parser = argparse.ArgumentParser(description='メインETLパイプライン')
     parser.add_argument('--days', type=int, default=5,
                        help='今日から遡る日数 (デフォルト: 5)')
     parser.add_argument('--month', type=str,
-                       help='指定月をダウンロード (YYYYMM形式)')
+                       help='指定月を処理 (YYYYMM形式)')
     parser.add_argument('--date', type=str,
-                       help='特定日をダウンロード (YYYYMMDD形式)')
-    parser.add_argument('--base-dir', type=str, default='data/raw',
-                       help='ローカル保存先ディレクトリ (デフォルト: data/raw)')
+                       help='特定日を処理 (YYYYMMDD形式)')
+    parser.add_argument('--base-dir', type=str, default=default_base_dir,
+                       help=f'ローカルデータ保存先 (デフォルト: {default_base_dir})')
     parser.add_argument('--bucket', type=str, default='energy-env-data',
                        help='GCSバケット名 (デフォルト: energy-env-data)')
     
     args = parser.parse_args()
     
-    # 実行モード判定と排他チェックを一括処理
-    if args.month and args.date:
-        print("❌ エラー: --month と --date は同時に指定できません")
-        return
-    elif args.month and (args.days != 5):
-        print("❌ エラー: --month と --days は同時に指定できません")
-        return
-    elif args.date and (args.days != 5):
-        print("❌ エラー: --date と --days は同時に指定できません")
+    # 引数の排他チェック
+    specified_args = [
+        bool(args.month),
+        bool(args.date),
+        args.days != 5  # デフォルト値以外が指定された場合
+    ]
+    
+    if sum(specified_args) > 1:
+        print("❌ エラー: --days, --month, --date は同時に指定できません")
+        print("   1つの実行で1つの処理のみ可能です")
         return
     
     # ETLパイプライン初期化
-    pipeline = MainETLPipeline(args.base_dir, args.bucket)
+    try:
+        pipeline = MainETLPipeline(args.base_dir, args.bucket)
+    except ValueError as e:
+        print(f"❌ エラー: {e}")
+        print("   ENERGY_ENV_PATH環境変数を設定してください")
+        return
     
     print("🚀 メインETLパイプライン開始")
-    print(f"📂 ローカル保存先: {args.base_dir}")
-    print(f"☁️  GCSバケット: gs://{args.bucket}")
+    print(f"📂 ローカル保存先: {pipeline.base_dir}")
+    print(f"☁️  GCSバケット: gs://{pipeline.bucket_name}")
     
+    # 実行モード判定と処理実行
     try:
-        # 実行モード判定とETL実行
         if args.month:
             print(f"📅 指定月モード: {args.month}")
             results = pipeline.run_etl_for_month(args.month)
@@ -395,14 +341,14 @@ def main():
             results = pipeline.run_etl_for_days(args.days)
         
         # 結果表示
-        print_etl_results(results)
+        print_results(results)
         
     except Exception as e:
         logger.error(f"ETL pipeline failed: {e}")
         print(f"💥 ETLパイプライン実行エラー: {e}")
         return
     
-    print("🏁 ETLパイプライン完了")
+    print("🏁 メインETLパイプライン完了")
 
 
 if __name__ == "__main__":
