@@ -1,62 +1,41 @@
-# 🚀 エネルギー予測プロジェクト フェーズ概要（更新版）
+# 🎯 エネルギー予測プロジェクト - 全Phase概要
 
-## 📋 プロジェクト全体構成 (Phase 1-12)
+## 📊 プロジェクト基本情報
 
-### **🏗️ 基盤構築フェーズ (Phase 1-6) - 完了**
+**目的**: Google Cloudベースの電力使用量予測パイプライン構築  
+**目標**: 年収700万円以上のフルリモートデータエンジニア職への就職  
+**期間**: 2025年4月〜2025年8月（Phase 1-10実装予定）  
+**環境**: Windows + VS Code + Python3.12 + GCP  
 
-#### **Phase 1-2: データ収集・統合基盤**
-- **実施内容**: 東京電力データ自動収集・BigQuery統合
-- **成果**: 30ヶ月分電力データ（21,888レコード）完全自動化
-- **技術習得**: Python・GCP・ETLパイプライン
+---
 
-**Phase 1: PowerDataDownloaderクラス基盤実装**
+## 🔥 Phase別実装詳細記録
+
+### **📊 データ基盤構築フェーズ (Phase 1-6) - 完了**
+
+#### **Phase 1-2: 電力データ基盤構築 - 完了**
+- **実施内容**: 東京電力API統合・GCS自動アップロード・ETLパイプライン
+- **成果**: 30ヶ月分電力データ取得・自動化パイプライン完成
+- **技術習得**: Python・GCP・API統合・自動化
+
+**Phase 1: PowerDataDownloaderクラス実装**
 ```python
 # ファイル: src/data_processing/data_downloader.py
 class PowerDataDownloader:
     BASE_URL = "https://www.tepco.co.jp/forecast/html/images"
     
-    def __init__(self, base_dir=None):
-        # 環境変数ENERGY_ENV_PATHから自動取得
-        if base_dir is None:
-            energy_env_path = os.getenv('ENERGY_ENV_PATH')
-            base_dir = os.path.join(energy_env_path, 'data', 'raw')
-    
-    # 主要メソッド
-    def download_month_data(self, yyyymm):        # 月単位ダウンロード・解凍
-    def download_for_days(self, days=5):          # 指定日数分の月取得
-    def download_for_month(self, yyyymm):         # 特定月取得
-    def download_for_date(self, date_str):        # 特定日の月取得
+    def download_month_data(self, yyyymm):    # 月単位ダウンロード・解凍
+    def download_for_days(self, days=5):      # 指定日数分の月取得
+    def download_for_month(self, yyyymm):     # 特定月取得
 ```
 
-**実行方法**:
-```bash
-# 単体実行（開発・テスト用）
-python -m src.data_processing.data_downloader --month 202508
-python -m src.data_processing.data_downloader --days 7
-```
-
-**Phase 2: ETL統合パイプライン実装**
+**Phase 2: MainETLPipelineクラス実装**
 ```python
 # ファイル: src/pipelines/main_etl.py
 class MainETLPipeline:
-    def __init__(self, base_dir=None, bucket_name="energy-env-data"):
-        # 各コンポーネントを統合
-        self.downloader = PowerDataDownloader(base_dir)  # Phase 1
-        self.uploader = GCSUploader(bucket_name)         # Phase 2
-    
-    # 統合ETL実行
-    def run_etl_for_month(self, yyyymm):    # Extract + Load
-    def run_etl_for_days(self, days=5):     # 複数月対応
-    def run_etl_for_date(self, date_str):   # 特定日対応
-```
-
-**実行方法**:
-```bash
-# 統合実行（本番用）
-python -m src.pipelines.main_etl --month 202508
-# ↓ 実行フロー
-# 1. PowerDataDownloader: 東京電力APIからダウンロード・解凍
-# 2. GCSUploader: Google Cloud Storageにアップロード
+    def run_etl_for_month(self, yyyymm):     # 統合ETL実行
+    # 1. PowerDataDownloader: 東京電力APIからダウンロード・解凍
+    # 2. GCSUploader: Google Cloud Storageにアップロード
 ```
 
 #### **Phase 3-4: 気象データ統合・分析**
@@ -141,12 +120,13 @@ class WeatherBigQueryLoader:
 
 ---
 
-### **📊 ダッシュボード構築フェーズ (Phase 10-11) - 実装中**
+### **📊 システム運用フェーズ (Phase 10-11) - 実装中**
 
 #### **Phase 10: 日次自動予測システム構築 - 実装中**
 - **実施内容**: 日次予測自動化・BigQueryテーブル更新・ダッシュボード用データ準備
 - **目標成果**: ローカル実行による予測結果自動更新システム完成
 - **技術習得**: Python自動化・スケジューリング・データパイプライン設計
+- **⚠️ API制限対応**: Open-Meteo API制限により予測期間を16日間に調整
 
 **Phase 10 実装戦略: 既存コンポーネント活用**
 ```python
@@ -161,9 +141,9 @@ class DailyPredictionPipeline:
     def run_daily_prediction(self):
         # 日次実行フロー
         # 1. 昨日の月 + 前月データ取得
-        # 2. 千葉県気象データ取得（昨日分）
+        # 2. 千葉県気象データ取得（昨日分+16日間予測）
         # 3. Phase 5-6特徴量生成ロジック活用
-        # 4. Phase 9 XGBoostモデルで予測実行
+        # 4. Phase 9 XGBoostモデルで1週間・2週間予測実行
         # 5. BigQuery prediction_resultsテーブル更新
 ```
 
@@ -178,6 +158,17 @@ prev_month = f"{yesterday.year}{yesterday.month-1:02d}"  # 前月
 # 既存のmain_etl.pyを活用
 subprocess.run(["python", "-m", "src.pipelines.main_etl", "--month", current_month])
 subprocess.run(["python", "-m", "src.pipelines.main_etl", "--month", prev_month])
+```
+
+**🌤️ Open-Meteo API制限対応**:
+```python
+# 気象データ取得戦略（制限対応）
+historical_api = "https://archive-api.open-meteo.com/v1/archive"  # 昨日分
+forecast_api = "https://api.open-meteo.com/v1/forecast"          # 16日間予測
+
+# 予測期間の調整
+SHORT_TERM_FORECAST = 7   # 1週間予測（高解像度モデル1-2km）
+LONG_TERM_FORECAST = 16   # 2週間予測（グローバルモデル11km）※制限上限
 ```
 
 #### **Phase 11: Looker Studio ダッシュボード開発 - 予定**
@@ -202,15 +193,16 @@ subprocess.run(["python", "-m", "src.pipelines.main_etl", "--month", prev_month]
 ```
 【毎日の実行フロー（Phase 10実装予定）】
 1. ローカルPC → 既存ETLパイプライン活用で昨日+前月データ取得
-2. ローカルPC → 既存WeatherProcessor活用で千葉県気象データ取得
+2. ローカルPC → Open-Meteo API（Historical + Forecast）で千葉県気象データ取得
 3. ローカルPC → Phase 5-6特徴量生成ロジック活用
-4. ローカルPC → Phase 9 XGBoostモデルで1週間・1ヶ月予測実行  
+4. ローカルPC → Phase 9 XGBoostモデルで1週間・2週間予測実行  
 5. ローカルPC → BigQueryに予測結果アップロード
 6. Looker Studio → BigQueryから自動更新・公開表示
 
 【技術スタック】
 - 実行環境: ローカルPC（VS Code + venv + 環境変数ENERGY_ENV_PATH）
 - データ取得: 既存PowerDataDownloader + WeatherProcessor活用
+- 気象API: Open-Meteo（Historical + Forecast、最大16日制限）
 - ML処理: Phase 9 XGBoostモデル（MAPE 2.15%）
 - データ保存: BigQuery・GCS（既存GCSUploader活用）
 - 可視化: Looker Studio（無料・公開可能）
@@ -228,15 +220,15 @@ ENERGY_ENV_PATH=/home/user/energy-env
 ### **既存コンポーネント活用戦略**
 - ✅ **PowerDataDownloader**: そのまま活用（月単位ダウンロード）
 - ✅ **MainETLPipeline**: そのまま活用（統合ETL実行）
-- ✅ **WeatherProcessor**: 千葉県・昨日分フィルタで活用
+- ✅ **WeatherProcessor**: 千葉県・日付フィルタで活用
 - ✅ **GCSUploader**: そのまま活用（データアップロード）
 - ✅ **Phase 5-6特徴量**: 生成ロジック流用
 - ✅ **Phase 9 XGBoost**: 学習済みモデル活用
 
 ### **ダッシュボード表示内容（Phase 11予定）**
 - **実績データ**: 過去の電力消費量推移
-- **1週間予測**: MAPE 2.15%の高精度予測
-- **1ヶ月予測**: 中期予測・計画策定支援
+- **1週間予測**: MAPE 2.15%の高精度予測（高解像度モデル）
+- **2週間予測**: 中期予測・計画策定支援（グローバルモデル）
 - **精度監視**: 予測精度・外れ値の継続監視
 - **技術詳細**: 使用特徴量・モデル性能指標
 
@@ -279,12 +271,12 @@ ENERGY_ENV_PATH=/home/user/energy-env
 ### **Week 1-2: Phase 10 日次自動予測システム**
 - 既存コンポーネント統合による日次実行スクリプト作成
 - 昨日+前月データ取得の自動化
-- 千葉県気象データ取得（WeatherProcessor活用）
+- 千葉県気象データ取得（Historical + Forecast API活用）
 - Phase 5-6特徴量生成ロジックの統合
 
 ### **Week 3-4: Phase 10 予測実行・結果保存**
 - Phase 9 XGBoostモデル統合
-- 1週間・1ヶ月予測実行
+- 1週間・2週間予測実行（Open-Meteo制限対応）
 - BigQuery prediction_resultsテーブル設計・更新
 - エラーハンドリング・ログ監視強化
 
@@ -328,4 +320,23 @@ ENERGY_ENV_PATH=/home/user/energy-env
 - **実用性**: 理論だけでなく実際に動作・公開されているシステム
 - **技術リーダー適性**: 設計思想・アーキテクチャ判断・品質管理経験
 
-**🎉 Phase 1-12完了により、データエンジニア・MLエンジニアとして年収700万円以上の市場価値を持つ即戦力人材としての完全確立！既存コンポーネントの効率的活用により、実用システム構築におけるアーキテクチャ設計・技術判断力も同時に実証！**
+---
+
+## 🚨 Phase 10 API制限対応・技術的制約
+
+### **Open-Meteo API制限の影響**
+- **制限内容**: 予測データ最大16日間（`&forecast_days=16`）
+- **元計画**: 1ヶ月予測（30日）→ **修正**: 2週間予測（16日）
+- **精度差**: 1-3日（高解像度1-2km）、4-16日（グローバル11km）
+
+### **代替案・拡張可能性**
+- **他APIとの組み合わせ**: OpenWeatherMap等の併用検討
+- **データ補間**: 16日以降は過去平均値・季節パターンで補完
+- **段階的拡張**: 将来的な有料API利用による期間延長
+
+### **実装への影響**
+- **ダッシュボード設計**: 1ヶ月表示→2週間表示に調整
+- **特徴量設計**: 16日間の気象データを前提とした設計
+- **ビジネス価値**: 2週間予測でも十分な実用価値を提供
+
+**🎉 Phase 1-12完了により、データエンジニア・MLエンジニアとして年収700万円以上の市場価値を持つ即戦力人材としての完全確立！Open-Meteo API制限という現実的制約に対する適切な対応により、実用システム構築における制約理解・代替案検討の実践的能力も同時に実証！**
