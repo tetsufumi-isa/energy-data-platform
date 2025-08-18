@@ -45,6 +45,11 @@ data/processed/
 *.json
 *.pdf
 
+# Weather data ファイル
+data/weather/*.json
+data/weather/*.csv
+
+
 # ログファイル
 logs/
 *.log

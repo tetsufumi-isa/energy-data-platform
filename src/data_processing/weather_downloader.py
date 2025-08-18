@@ -1,17 +1,17 @@
 """
-気象データダウンローダー - Open-Meteo API統合
+気象データダウンローダー - Open-Meteo API統合（修正版）
 
 Phase 10: 日次自動予測システム用
-- Historical API: 過去7日分の実績データ取得
+- Historical API: 過去データ取得（2日遅延考慮）
 - Forecast API: 16日間の予測データ取得
-- 無駄な変換を削除し、APIレスポンスを直接保存
+- 基準日による取得ロジック分離
 
 実行方法:
-    # 千葉県の過去7日+16日間予測取得
+    # 日次自動実行用（過去10日+予測16日）
     python -m src.data_processing.weather_downloader
     
-    # 特定日付指定
-    python -m src.data_processing.weather_downloader --date 2025-08-07
+    # 過去データ分析用（指定日から30日前まで）
+    python -m src.data_processing.weather_downloader --date 2025-08-01
     
     # 出力ディレクトリ指定
     python -m src.data_processing.weather_downloader --output-dir data/weather/raw/daily
@@ -214,32 +214,34 @@ class WeatherDownloader:
         }
         
         try:
-            # JSONパース可能性チェック
+            # JSON形式チェック（必要時のみ変換）
             data = response.json()
             
             # 基本構造チェック
-            hourly_data = data.get('hourly', {})
-            required_fields = ['time'] + self.WEATHER_VARIABLES
+            if 'hourly' not in data:
+                validation_result['valid'] = False
+                validation_result['issues'].append("Missing 'hourly' data")
+                return validation_result
             
-            for field in required_fields:
-                if field not in hourly_data:
-                    validation_result['valid'] = False
-                    validation_result['issues'].append(f"Missing field: {field}")
+            hourly_data = data['hourly']
             
-            if validation_result['valid']:
-                # データ統計
-                time_data = hourly_data['time']
-                validation_result['stats'] = {
-                    'total_hours': len(time_data),
-                    'start_time': time_data[0] if time_data else None,
-                    'end_time': time_data[-1] if time_data else None
-                }
-                
-                logger.info(f"Data validation: {validation_result['stats']}")
+            # 気象変数存在チェック
+            missing_vars = []
+            for var in self.WEATHER_VARIABLES:
+                if var not in hourly_data:
+                    missing_vars.append(var)
+            
+            if missing_vars:
+                validation_result['valid'] = False
+                validation_result['issues'].append(f"Missing variables: {missing_vars}")
+            
+            # データポイント数カウント
+            if 'time' in hourly_data:
+                validation_result['stats']['total_hours'] = len(hourly_data['time'])
             
         except json.JSONDecodeError as e:
             validation_result['valid'] = False
-            validation_result['issues'].append(f"Invalid JSON: {e}")
+            validation_result['issues'].append(f"JSON decode error: {e}")
         except Exception as e:
             validation_result['valid'] = False
             validation_result['issues'].append(f"Validation error: {e}")
@@ -248,85 +250,129 @@ class WeatherDownloader:
     
     def download_daily_weather_data(self, target_date=None):
         """
-        日次気象データ取得（過去7日 + 16日間予測）
+        日次気象データダウンロード（修正版）
         
         Args:
-            target_date (str, optional): 基準日 (YYYY-MM-DD)
-                                       Noneの場合は昨日を使用
-            
+            target_date (str): 基準日 (YYYY-MM-DD形式)
+                             None: 日次自動実行用（過去10日+予測16日）
+                             指定: 過去データ分析用（指定日から30日前まで）
+        
         Returns:
-            dict: 処理結果 {'historical': [...], 'forecast': [...]}
+            dict: ダウンロード結果
         """
+        today = datetime.now()
+        
         if target_date is None:
-            # 昨日を基準日とする
-            yesterday = datetime.now() - timedelta(days=1)
-            target_date = yesterday.strftime('%Y-%m-%d')
-        else:
-            # 日付フォーマット検証
+            # ケース1: 基準日無し（日次自動実行用）
+            logger.info("Daily automatic execution mode: historical (10 days ago to 3 days ago) + forecast (16 days)")
+            
+            # 過去データ: 10日前から3日前まで（API遅延考慮）
+            historical_start = (today - timedelta(days=10)).strftime('%Y-%m-%d')
+            historical_end = (today - timedelta(days=3)).strftime('%Y-%m-%d')
+            
+            # ファイル名用の日付（今日）
+            date_part = today.strftime('%m%d')
+            year = today.year
+            
+            session = self.create_robust_session()
+            results = {'historical': [], 'forecast': []}
+            
             try:
-                datetime.strptime(target_date, '%Y-%m-%d')
+                # 1. 過去データ取得
+                historical_response = self.get_historical_data(session, historical_start, historical_end)
+                
+                # レスポンス検証
+                validation = self.validate_response(historical_response)
+                if not validation['valid']:
+                    logger.warning(f"Historical data validation issues: {validation['issues']}")
+                
+                # ファイル名: chiba_2025_0818_historical.json
+                historical_filename = f"chiba_{year}_{date_part}_historical.json"
+                historical_path = self.save_json_response(historical_response, historical_filename)
+                
+                results['historical'].append({
+                    'file': historical_path,
+                    'period': f"{historical_start} to {historical_end}",
+                    'data_points': validation['stats'].get('total_hours', 0) if validation['valid'] else 0,
+                    'validation': validation
+                })
+                
+                # 2. 予測データ取得
+                forecast_response = self.get_forecast_data(session, forecast_days=16)
+                
+                # レスポンス検証
+                validation = self.validate_response(forecast_response)
+                if not validation['valid']:
+                    logger.warning(f"Forecast data validation issues: {validation['issues']}")
+                
+                # ファイル名: chiba_2025_0818_forecast.json
+                forecast_filename = f"chiba_{year}_{date_part}_forecast.json"
+                forecast_path = self.save_json_response(forecast_response, forecast_filename)
+                
+                results['forecast'].append({
+                    'file': forecast_path,
+                    'forecast_days': 16,
+                    'data_points': validation['stats'].get('total_hours', 0) if validation['valid'] else 0,
+                    'validation': validation
+                })
+                
+                logger.info("Daily automatic weather data download completed successfully")
+                return results
+                
+            except Exception as e:
+                logger.error(f"Daily automatic weather data download failed: {e}")
+                raise
+            finally:
+                session.close()
+        
+        else:
+            # ケース2: 基準日指定（過去データ分析用）
+            try:
+                target_dt = datetime.strptime(target_date, '%Y-%m-%d')
             except ValueError:
-                raise ValueError(f"Invalid date format: {target_date}. Use YYYY-MM-DD format.")
-        
-        logger.info(f"Starting daily weather data download for {target_date}")
-        
-        # セッション作成
-        session = self.create_robust_session()
-        results = {'historical': [], 'forecast': []}
-        
-        try:
-            # 1. 過去7日分データ取得
-            target_dt = datetime.strptime(target_date, '%Y-%m-%d')
-            start_date = (target_dt - timedelta(days=6)).strftime('%Y-%m-%d')  # 6日前（計7日間）
-            end_date = target_date
+                raise ValueError(f"Invalid date format. Use YYYY-MM-DD format.")
             
-            historical_response = self.get_historical_data(session, start_date, end_date)
+            logger.info(f"Historical analysis mode: {target_date} and 30 days before")
             
-            # レスポンス検証
-            validation = self.validate_response(historical_response)
-            if not validation['valid']:
-                logger.warning(f"Historical data validation issues: {validation['issues']}")
+            # 過去データ: 指定日から30日前まで
+            historical_start = (target_dt - timedelta(days=30)).strftime('%Y-%m-%d')
+            historical_end = target_date
             
-            # ファイル名: chiba_2025_0801_historical.json
+            # ファイル名用の日付（指定日）
             date_part = target_dt.strftime('%m%d')
             year = target_dt.year
-            historical_filename = f"chiba_{year}_{date_part}_historical.json"
             
-            historical_path = self.save_json_response(historical_response, historical_filename)
-            results['historical'].append({
-                'file': historical_path,
-                'period': f"{start_date} to {end_date}",
-                'data_points': validation['stats'].get('total_hours', 0) if validation['valid'] else 0,
-                'validation': validation
-            })
+            session = self.create_robust_session()
+            results = {'historical': [], 'forecast': []}
             
-            # 2. 16日間予測データ取得
-            forecast_response = self.get_forecast_data(session, forecast_days=16)
-            
-            # レスポンス検証
-            validation = self.validate_response(forecast_response)
-            if not validation['valid']:
-                logger.warning(f"Forecast data validation issues: {validation['issues']}")
-            
-            # ファイル名: chiba_2025_0801_forecast.json
-            forecast_filename = f"chiba_{year}_{date_part}_forecast.json"
-            
-            forecast_path = self.save_json_response(forecast_response, forecast_filename)
-            results['forecast'].append({
-                'file': forecast_path,
-                'forecast_days': 16,
-                'data_points': validation['stats'].get('total_hours', 0) if validation['valid'] else 0,
-                'validation': validation
-            })
-            
-            logger.info("Daily weather data download completed successfully")
-            return results
-            
-        except Exception as e:
-            logger.error(f"Daily weather data download failed: {e}")
-            raise
-        finally:
-            session.close()
+            try:
+                # 過去データのみ取得
+                historical_response = self.get_historical_data(session, historical_start, historical_end)
+                
+                # レスポンス検証
+                validation = self.validate_response(historical_response)
+                if not validation['valid']:
+                    logger.warning(f"Historical data validation issues: {validation['issues']}")
+                
+                # ファイル名: chiba_2025_0801_historical_30days.json
+                historical_filename = f"chiba_{year}_{date_part}_historical_30days.json"
+                historical_path = self.save_json_response(historical_response, historical_filename)
+                
+                results['historical'].append({
+                    'file': historical_path,
+                    'period': f"{historical_start} to {historical_end}",
+                    'data_points': validation['stats'].get('total_hours', 0) if validation['valid'] else 0,
+                    'validation': validation
+                })
+                
+                logger.info(f"Historical analysis weather data download completed for {target_date}")
+                return results
+                
+            except Exception as e:
+                logger.error(f"Historical analysis weather data download failed: {e}")
+                raise
+            finally:
+                session.close()
 
 
 def print_results(results):
@@ -364,9 +410,9 @@ def main():
     # ログ設定を初期化
     setup_logging()
     
-    parser = argparse.ArgumentParser(description='Open-Meteo気象データダウンローダー')
+    parser = argparse.ArgumentParser(description='Open-Meteo気象データダウンローダー（修正版）')
     parser.add_argument('--date', type=str,
-                       help='基準日 (YYYY-MM-DD形式、デフォルト: 昨日)')
+                       help='基準日 (YYYY-MM-DD形式) 指定なし:日次自動実行用、指定あり:過去データ分析用')
     parser.add_argument('--output-dir', type=str,
                        help='出力ディレクトリパス')
     
@@ -377,16 +423,20 @@ def main():
           f"lon: {WeatherDownloader.CHIBA_COORDS['longitude']})")
     
     if args.date:
-        print(f"📅 基準日: {args.date}")
+        print(f"📅 基準日指定: {args.date} (過去データ分析用)")
+        print(f"📊 取得範囲: {args.date}から30日前までの過去データ")
     else:
-        yesterday = datetime.now() - timedelta(days=1)
-        print(f"📅 基準日: {yesterday.strftime('%Y-%m-%d')} (昨日)")
+        today = datetime.now()
+        historical_start = (today - timedelta(days=10)).strftime('%Y-%m-%d')
+        historical_end = (today - timedelta(days=3)).strftime('%Y-%m-%d')
+        print(f"📅 日次自動実行モード")
+        print(f"📊 取得範囲: 過去データ({historical_start}〜{historical_end}) + 予測データ(16日間)")
     
     try:
         # WeatherDownloader初期化
         downloader = WeatherDownloader(args.output_dir)
         
-        # 日次気象データダウンロード実行
+        # 気象データダウンロード実行
         results = downloader.download_daily_weather_data(args.date)
         
         # 結果表示
