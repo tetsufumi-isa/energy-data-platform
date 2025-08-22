@@ -28,6 +28,9 @@ ml_features = pd.read_csv('../../../data/ml/ml_features.csv')
 print(f"📊 データ読み込み完了")
 print(f"データ形状: {ml_features.shape}")
 
+# dateとhour列からdatetime列を作成
+ml_features['datetime'] = pd.to_datetime(ml_features['date'].astype(str) + ' ' + ml_features['hour'].astype(str).str.zfill(2) + ':00:00')
+
 # 列名確認
 print(f"列名: {list(ml_features.columns)}")
 
@@ -129,8 +132,11 @@ def get_prev_business_day(target_date):
     # フォールバック: 単純に前日を返す
     return (target_date - timedelta(days=1)).date()
 
-def prepare_features_for_prediction(target_datetime, predictions_dict):
-    """予測対象時刻の特徴量を準備"""
+def prepare_features_for_prediction_debug(target_datetime, predictions_dict):
+    """予測対象時刻の特徴量を準備（デバッグ版）"""
+    print(f"\n{'='*60}")
+    print(f"🔍 特徴量デバッグ: {target_datetime}")
+    print(f"{'='*60}")
     
     # 基本カレンダー特徴量（確定値）
     hour = target_datetime.hour
@@ -139,50 +145,88 @@ def prepare_features_for_prediction(target_datetime, predictions_dict):
     hour_sin = np.sin(2 * np.pi * hour / 24)
     hour_cos = np.cos(2 * np.pi * hour / 24)
     
+    print(f"📅 基本カレンダー特徴量:")
+    print(f"  hour: {hour}")
+    print(f"  is_weekend: {is_weekend} ({'週末' if is_weekend else '平日'})")
+    print(f"  month: {month}")
+    print(f"  hour_sin: {hour_sin:.4f}")
+    print(f"  hour_cos: {hour_cos:.4f}")
+    
     # 祝日フラグ（正確な実装）
     target_date_str = target_datetime.strftime('%Y-%m-%d')
     if target_date_str in calendar_data.index:
         is_holiday = 1 if calendar_data.loc[target_date_str, 'is_holiday'] else 0
+        print(f"  is_holiday: {is_holiday} (カレンダーデータから取得)")
     else:
         is_holiday = 0  # フォールバック
+        print(f"  is_holiday: {is_holiday} (フォールバック値)")
     
     # 気象データ（ml_featuresの実績値使用）
+    print(f"\n🌤️ 気象特徴量:")
     if target_datetime in ml_features.index:
         temperature_2m = ml_features.loc[target_datetime, 'temperature_2m']
         relative_humidity_2m = ml_features.loc[target_datetime, 'relative_humidity_2m']
         precipitation = ml_features.loc[target_datetime, 'precipitation']
+        print(f"  temperature_2m: {temperature_2m}°C (実績値)")
+        print(f"  relative_humidity_2m: {relative_humidity_2m}% (実績値)")
+        print(f"  precipitation: {precipitation}mm (実績値)")
     else:
         # フォールバック値
         temperature_2m = 20.0
         relative_humidity_2m = 60.0
         precipitation = 0.0
+        print(f"  temperature_2m: {temperature_2m}°C (フォールバック)")
+        print(f"  relative_humidity_2m: {relative_humidity_2m}% (フォールバック)")
+        print(f"  precipitation: {precipitation}mm (フォールバック)")
     
     # lag_1_day（前日同時刻）
+    print(f"\n⏰ ラグ特徴量:")
     lag_1_day_datetime = target_datetime - timedelta(days=1)
+    print(f"  lag_1_day参照時刻: {lag_1_day_datetime}")
+    
     if lag_1_day_datetime in ml_features.index and lag_1_day_datetime <= pd.to_datetime('2025-05-31 23:00:00'):
         lag_1_day = ml_features.loc[lag_1_day_datetime, 'actual_power']
+        print(f"  lag_1_day: {lag_1_day}万kW (実績値)")
     elif lag_1_day_datetime in predictions_dict:
         lag_1_day = predictions_dict[lag_1_day_datetime]  # 予測値使用
+        print(f"  lag_1_day: {lag_1_day}万kW (予測値)")
     else:
         lag_1_day = 3500.0  # フォールバック値
+        print(f"  lag_1_day: {lag_1_day}万kW (フォールバック)")
     
     # lag_7_day（7日前同時刻）
     lag_7_day_datetime = target_datetime - timedelta(days=7)
+    print(f"  lag_7_day参照時刻: {lag_7_day_datetime}")
+    
     if lag_7_day_datetime in ml_features.index:
         lag_7_day = ml_features.loc[lag_7_day_datetime, 'actual_power']
+        print(f"  lag_7_day: {lag_7_day}万kW (実績値)")
     else:
         lag_7_day = 3500.0  # フォールバック値
+        print(f"  lag_7_day: {lag_7_day}万kW (フォールバック)")
     
     # lag_1_business_day（前営業日同時刻）- 最重要特徴量！
     prev_business_date = get_prev_business_day(target_datetime.date())
     lag_1_business_day_datetime = pd.to_datetime(f"{prev_business_date} {target_datetime.strftime('%H:%M:%S')}")
+    print(f"  前営業日: {prev_business_date}")
+    print(f"  lag_1_business_day参照時刻: {lag_1_business_day_datetime}")
     
     if lag_1_business_day_datetime in ml_features.index and lag_1_business_day_datetime <= pd.to_datetime('2025-05-31 23:00:00'):
         lag_1_business_day = ml_features.loc[lag_1_business_day_datetime, 'actual_power']
+        print(f"  lag_1_business_day: {lag_1_business_day}万kW (実績値) ⭐重要度84.3%")
     elif lag_1_business_day_datetime in predictions_dict:
         lag_1_business_day = predictions_dict[lag_1_business_day_datetime]  # 予測値使用（重要！）
+        print(f"  lag_1_business_day: {lag_1_business_day}万kW (予測値) ⭐重要度84.3%")
     else:
         lag_1_business_day = 3500.0  # フォールバック値
+        print(f"  lag_1_business_day: {lag_1_business_day}万kW (フォールバック) ⭐重要度84.3%")
+    
+    # 実績値確認（比較用）
+    if target_datetime in ml_features.index:
+        actual_value = ml_features.loc[target_datetime, 'actual_power']
+        print(f"\n📊 実績値: {actual_value}万kW")
+    else:
+        print(f"\n📊 実績値: 取得不可")
     
     # 特徴量辞書作成
     feature_values = {
@@ -199,6 +243,9 @@ def prepare_features_for_prediction(target_datetime, predictions_dict):
         'relative_humidity_2m': relative_humidity_2m,
         'precipitation': precipitation
     }
+    
+    print(f"\n✅ 特徴量準備完了")
+    print(f"{'='*60}")
     
     return feature_values
 
@@ -235,7 +282,7 @@ for day in range(16):
         target_datetime = current_date + timedelta(hours=hour)
         
         # 特徴量準備
-        feature_values = prepare_features_for_prediction(target_datetime, predictions)
+        feature_values = prepare_features_for_prediction_debug(target_datetime, predictions)
         
         # DataFrameに変換（XGBoostに入力）
         X_pred = pd.DataFrame([feature_values], columns=features)
@@ -405,3 +452,128 @@ print(f"  - 2週間以上: 精度劣化を考慮した運用計画が必要")
 print(f"  - 毎日の再予測によるメンテナンスが効果的")
 
 print(f"\n✅ 段階的予測テスト完了")
+
+# %%
+
+
+target_datetime = pd.to_datetime('2025-06-01 00:00:00')
+predictions_dict = {}
+
+
+
+
+
+
+"""予測対象時刻の特徴量を準備（デバッグ版）"""
+print(f"\n{'='*60}")
+print(f"🔍 特徴量デバッグ: {target_datetime}")
+print(f"{'='*60}")
+
+# 基本カレンダー特徴量（確定値）
+hour = target_datetime.hour
+is_weekend = 1 if target_datetime.weekday() >= 5 else 0
+month = target_datetime.month
+hour_sin = np.sin(2 * np.pi * hour / 24)
+hour_cos = np.cos(2 * np.pi * hour / 24)
+
+print(f"📅 基本カレンダー特徴量:")
+print(f"  hour: {hour}")
+print(f"  is_weekend: {is_weekend} ({'週末' if is_weekend else '平日'})")
+print(f"  month: {month}")
+print(f"  hour_sin: {hour_sin:.4f}")
+print(f"  hour_cos: {hour_cos:.4f}")
+
+# 祝日フラグ（正確な実装）
+target_date_str = target_datetime.strftime('%Y-%m-%d')
+if target_date_str in calendar_data.index:
+    is_holiday = 1 if calendar_data.loc[target_date_str, 'is_holiday'] else 0
+    print(f"  is_holiday: {is_holiday} (カレンダーデータから取得)")
+else:
+    is_holiday = 0  # フォールバック
+    print(f"  is_holiday: {is_holiday} (フォールバック値)")
+
+# 気象データ（ml_featuresの実績値使用）
+print(f"\n🌤️ 気象特徴量:")
+if target_datetime in ml_features.index:
+    temperature_2m = ml_features.loc[target_datetime, 'temperature_2m']
+    relative_humidity_2m = ml_features.loc[target_datetime, 'relative_humidity_2m']
+    precipitation = ml_features.loc[target_datetime, 'precipitation']
+    print(f"  temperature_2m: {temperature_2m}°C (実績値)")
+    print(f"  relative_humidity_2m: {relative_humidity_2m}% (実績値)")
+    print(f"  precipitation: {precipitation}mm (実績値)")
+else:
+    # フォールバック値
+    temperature_2m = 20.0
+    relative_humidity_2m = 60.0
+    precipitation = 0.0
+    print(f"  temperature_2m: {temperature_2m}°C (フォールバック)")
+    print(f"  relative_humidity_2m: {relative_humidity_2m}% (フォールバック)")
+    print(f"  precipitation: {precipitation}mm (フォールバック)")
+
+# lag_1_day（前日同時刻）
+print(f"\n⏰ ラグ特徴量:")
+lag_1_day_datetime = target_datetime - timedelta(days=1)
+print(f"  lag_1_day参照時刻: {lag_1_day_datetime}")
+
+if lag_1_day_datetime in ml_features.index and lag_1_day_datetime <= pd.to_datetime('2025-05-31 23:00:00'):
+    lag_1_day = ml_features.loc[lag_1_day_datetime, 'actual_power']
+    print(f"  lag_1_day: {lag_1_day}万kW (実績値)")
+elif lag_1_day_datetime in predictions_dict:
+    lag_1_day = predictions_dict[lag_1_day_datetime]  # 予測値使用
+    print(f"  lag_1_day: {lag_1_day}万kW (予測値)")
+else:
+    lag_1_day = 3500.0  # フォールバック値
+    print(f"  lag_1_day: {lag_1_day}万kW (フォールバック)")
+
+# lag_7_day（7日前同時刻）
+lag_7_day_datetime = target_datetime - timedelta(days=7)
+print(f"  lag_7_day参照時刻: {lag_7_day_datetime}")
+
+if lag_7_day_datetime in ml_features.index:
+    lag_7_day = ml_features.loc[lag_7_day_datetime, 'actual_power']
+    print(f"  lag_7_day: {lag_7_day}万kW (実績値)")
+else:
+    lag_7_day = 3500.0  # フォールバック値
+    print(f"  lag_7_day: {lag_7_day}万kW (フォールバック)")
+
+# lag_1_business_day（前営業日同時刻）- 最重要特徴量！
+prev_business_date = get_prev_business_day(target_datetime.date())
+lag_1_business_day_datetime = pd.to_datetime(f"{prev_business_date} {target_datetime.strftime('%H:%M:%S')}")
+print(f"  前営業日: {prev_business_date}")
+print(f"  lag_1_business_day参照時刻: {lag_1_business_day_datetime}")
+
+if lag_1_business_day_datetime in ml_features.index and lag_1_business_day_datetime <= pd.to_datetime('2025-05-31 23:00:00'):
+    lag_1_business_day = ml_features.loc[lag_1_business_day_datetime, 'actual_power']
+    print(f"  lag_1_business_day: {lag_1_business_day}万kW (実績値) ⭐重要度84.3%")
+elif lag_1_business_day_datetime in predictions_dict:
+    lag_1_business_day = predictions_dict[lag_1_business_day_datetime]  # 予測値使用（重要！）
+    print(f"  lag_1_business_day: {lag_1_business_day}万kW (予測値) ⭐重要度84.3%")
+else:
+    lag_1_business_day = 3500.0  # フォールバック値
+    print(f"  lag_1_business_day: {lag_1_business_day}万kW (フォールバック) ⭐重要度84.3%")
+
+# 実績値確認（比較用）
+if target_datetime in ml_features.index:
+    actual_value = ml_features.loc[target_datetime, 'actual_power']
+    print(f"\n📊 実績値: {actual_value}万kW")
+else:
+    print(f"\n📊 実績値: 取得不可")
+
+# 特徴量辞書作成
+feature_values = {
+    'hour': hour,
+    'is_weekend': is_weekend,
+    'is_holiday': is_holiday,
+    'month': month,
+    'hour_sin': hour_sin,
+    'hour_cos': hour_cos,
+    'lag_1_day': lag_1_day,
+    'lag_7_day': lag_7_day,
+    'lag_1_business_day': lag_1_business_day,
+    'temperature_2m': temperature_2m,
+    'relative_humidity_2m': relative_humidity_2m,
+    'precipitation': precipitation
+}
+
+print(f"\n✅ 特徴量準備完了")
+print(f"{'='*60}")
