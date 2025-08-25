@@ -19,7 +19,7 @@ def check_missing_values():
         return
     
     # ファイルパスの構築
-    file_path = Path(env_path) / "data" / "features" / "ml_features.csv"
+    file_path = Path(env_path) / "data" / "ml" / "ml_features.csv"
     
     print(f"🔍 チェック対象ファイル: {file_path}")
     print("=" * 60)
@@ -131,14 +131,80 @@ def check_missing_values():
                         if date_col in df_with_missing.columns:
                             try:
                                 df_with_missing[date_col] = pd.to_datetime(df_with_missing[date_col])
+                                
+                                # 日別の欠損行数
                                 missing_by_date = df_with_missing.groupby(df_with_missing[date_col].dt.date)['has_missing'].sum()
+                                
+                                # 日別の欠損セル数
+                                missing_cells_by_date = df_with_missing.groupby(df_with_missing[date_col].dt.date).apply(
+                                    lambda x: x.drop(columns=['has_missing']).isnull().sum().sum()
+                                )
+                                
                                 if missing_by_date.sum() > 0:
                                     print(f"欠損がある日数: {(missing_by_date > 0).sum()}日")
-                                    print("欠損が多い日（上位5日）:")
-                                    top_missing_dates = missing_by_date.nlargest(5)
-                                    for date, count in top_missing_dates.items():
-                                        if count > 0:
-                                            print(f"  {date}: {count}行")
+                                    print()
+                                    
+                                    # 日別の列ごと欠損数
+                                    missing_by_date_column = df_with_missing.groupby(df_with_missing[date_col].dt.date).apply(
+                                        lambda x: x.drop(columns=['has_missing']).isnull().sum()
+                                    )
+                                    
+                                    print("📊 日別欠損行数（上位10日）:")
+                                    print(f"{'日付':<12} {'欠損行数':<8}")
+                                    print("-" * 25)
+                                    
+                                    # 欠損行数でソートして上位10日を表示
+                                    top_dates_rows = missing_by_date.nlargest(10)
+                                    for date, rows in top_dates_rows.items():
+                                        if rows > 0:
+                                            print(f"{str(date):<12} {rows:<8}")
+                                    
+                                    print()
+                                    print("📊 日別欠損セル数（上位10日）:")
+                                    print(f"{'日付':<12} {'欠損セル数':<10}")
+                                    print("-" * 25)
+                                    
+                                    # 欠損セル数でソートして上位10日を表示
+                                    top_dates_cells = missing_cells_by_date.nlargest(10)
+                                    for date, cells in top_dates_cells.items():
+                                        if cells > 0:
+                                            print(f"{str(date):<12} {cells:<10}")
+                                    
+                                    print()
+                                    print("📊 日別列ごと欠損数（欠損セル数上位5日）:")
+                                    print("-" * 40)
+                                    
+                                    # 欠損セル数上位5日の列別詳細を表示
+                                    top_5_dates = missing_cells_by_date.nlargest(5).index
+                                    for date in top_5_dates:
+                                        if missing_by_date[date] > 0:
+                                            print(f"\n📅 {date} (欠損行数: {missing_by_date[date]}, 欠損セル数: {missing_cells_by_date[date]})")
+                                            column_missing = missing_by_date_column.loc[date]
+                                            column_missing_filtered = column_missing[column_missing > 0].sort_values(ascending=False)
+                                            
+                                            if len(column_missing_filtered) > 0:
+                                                for col, count in column_missing_filtered.items():
+                                                    print(f"  {col}: {count}個")
+                                            else:
+                                                print("  （欠損なし）")
+                                    
+                                    print()
+                                    print("📈 欠損パターン分析:")
+                                    total_missing_rows = missing_by_date.sum()
+                                    total_missing_cells = missing_cells_by_date.sum()
+                                    overall_avg = total_missing_cells / total_missing_rows if total_missing_rows > 0 else 0
+                                    print(f"  総欠損行数: {total_missing_rows}")
+                                    print(f"  総欠損セル数: {total_missing_cells}")
+                                    print(f"  平均セル/行: {overall_avg:.1f}")
+                                    
+                                    # パターン判定
+                                    total_columns = len([col for col in df.columns if col != 'has_missing'])
+                                    if overall_avg >= total_columns * 0.8:  # 80%以上の列で欠損
+                                        print("  🚨 パターン: 全列欠損型（API障害の可能性）")
+                                    elif overall_avg <= 3:
+                                        print("  ⚠️  パターン: 部分欠損型（特定列の問題）")
+                                    else:
+                                        print("  📊 パターン: 混在型（複合的な問題）")
                             except:
                                 print(f"  {date_col}を日付として解析できませんでした")
         

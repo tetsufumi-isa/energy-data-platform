@@ -14,6 +14,7 @@ from sklearn.metrics import mean_absolute_percentage_error, mean_absolute_error,
 import xgboost as xgb
 import warnings
 warnings.filterwarnings('ignore')
+from datetime import datetime, timedelta
 
 # 日本語フォント設定（文字化け防止）
 plt.rcParams['font.family'] = 'Meiryo'
@@ -386,3 +387,147 @@ print("🎊 Phase 9 完了! お疲れ様でした!")
 print("="*60)
 
 # %%
+# ================================================================
+# 11. Phase 9日別精度分析・可視化（段階的予測との比較用）
+# ================================================================
+
+print(f"\n" + "="*60)
+print("📈 Phase 9日別精度分析")
+print("="*60)
+
+# 日別精度計算（Phase 9 dropna版）
+daily_results_phase9 = []
+
+# 予測期間を日別に分割（2025-06-01〜2025-06-16の16日間）
+analysis_start = pd.to_datetime('2025-06-01')
+analysis_end = pd.to_datetime('2025-06-16')
+
+for day in range(16):
+    current_date = analysis_start + timedelta(days=day)
+    
+    # 1日分のデータを抽出
+    day_start = current_date
+    day_end = current_date + timedelta(hours=23)
+    
+    # その日の予測値と実績値を取得
+    day_mask = (test_data_month_clean['datetime'] >= day_start) & (test_data_month_clean['datetime'] <= day_end)
+    day_data = test_data_month_clean[day_mask]
+    
+    if len(day_data) == 24:  # 完全な1日分のデータがある場合
+        # その日の予測値取得（既に計算済み）
+        day_indices = day_data.index
+        day_predictions = y_pred_month_clean[test_data_month_clean.index.isin(day_indices)]
+        day_actuals = day_data['actual_power'].values
+        
+        # 日別精度計算
+        daily_mape = mean_absolute_percentage_error(day_actuals, day_predictions) * 100
+        daily_mae = mean_absolute_error(day_actuals, day_predictions)
+        daily_r2 = r2_score(day_actuals, day_predictions)
+        
+        daily_results_phase9.append({
+            'day': day + 1,
+            'date': current_date.strftime('%Y-%m-%d'),
+            'mape': daily_mape,
+            'mae': daily_mae,
+            'r2': daily_r2,
+            'predictions_mean': np.mean(day_predictions),
+            'actuals_mean': np.mean(day_actuals)
+        })
+        
+        print(f"Day {day+1:2d} ({current_date.strftime('%m-%d')}): MAPE {daily_mape:.2f}%, MAE {daily_mae:.1f}万kW, R² {daily_r2:.4f}")
+
+# DataFrame変換
+daily_df_phase9 = pd.DataFrame(daily_results_phase9)
+
+# 日別MAPE推移グラフ（Phase 9版）
+plt.figure(figsize=(15, 10))
+
+plt.subplot(2, 2, 1)
+plt.plot(daily_df_phase9['day'], daily_df_phase9['mape'], 'go-', linewidth=2, markersize=6, label='Phase 9（静的予測）')
+plt.axhline(y=mape_clean, color='g', linestyle='--', alpha=0.7, label=f'Phase 9全期間平均 ({mape_clean:.2f}%)')
+plt.title('📈 Phase 9 日別MAPE推移（静的予測）', fontsize=14, fontweight='bold')
+plt.xlabel('Day')
+plt.ylabel('MAPE (%)')
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.ylim(0, max(daily_df_phase9['mape'].max() * 1.1, 5))
+
+# 日別MAE推移グラフ
+plt.subplot(2, 2, 2)
+plt.plot(daily_df_phase9['day'], daily_df_phase9['mae'], 'bo-', linewidth=2, markersize=6)
+plt.axhline(y=mae_clean, color='b', linestyle='--', alpha=0.7, label=f'Phase 9全期間平均 ({mae_clean:.1f}万kW)')
+plt.title('📈 Phase 9 日別MAE推移', fontsize=14, fontweight='bold')
+plt.xlabel('Day')
+plt.ylabel('MAE (万kW)')
+plt.grid(True, alpha=0.3)
+plt.legend()
+
+# 日別R²推移グラフ
+plt.subplot(2, 2, 3)
+plt.plot(daily_df_phase9['day'], daily_df_phase9['r2'], 'mo-', linewidth=2, markersize=6)
+plt.axhline(y=r2_clean, color='m', linestyle='--', alpha=0.7, label=f'Phase 9全期間平均 ({r2_clean:.4f})')
+plt.title('📈 Phase 9 日別R²推移', fontsize=14, fontweight='bold')
+plt.xlabel('Day')
+plt.ylabel('R² Score')
+plt.grid(True, alpha=0.3)
+plt.legend()
+
+# MAPE変動分析
+plt.subplot(2, 2, 4)
+mape_deviation = daily_df_phase9['mape'] - daily_df_phase9['mape'].mean()
+plt.plot(daily_df_phase9['day'], mape_deviation, 'ro-', linewidth=2, markersize=6)
+plt.axhline(y=0, color='k', linestyle='-', alpha=0.5)
+plt.title('📊 MAPE変動（平均からの乖離）', fontsize=14, fontweight='bold')
+plt.xlabel('Day')
+plt.ylabel('MAPE乖離 (%)')
+plt.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+# Phase 9日別統計サマリー
+print(f"\n📊 Phase 9日別精度統計:")
+print(f"┌─────────────┬──────────┬──────────┬──────────┐")
+print(f"│ 指標        │ 平均     │ 最小     │ 最大     │")
+print(f"├─────────────┼──────────┼──────────┼──────────┤")
+print(f"│ MAPE (%)    │ {daily_df_phase9['mape'].mean():8.2f} │ {daily_df_phase9['mape'].min():8.2f} │ {daily_df_phase9['mape'].max():8.2f} │")
+print(f"│ MAE (万kW)  │ {daily_df_phase9['mae'].mean():8.1f} │ {daily_df_phase9['mae'].min():8.1f} │ {daily_df_phase9['mae'].max():8.1f} │")
+print(f"│ R²          │ {daily_df_phase9['r2'].mean():8.4f} │ {daily_df_phase9['r2'].min():8.4f} │ {daily_df_phase9['r2'].max():8.4f} │")
+print(f"└─────────────┴──────────┴──────────┴──────────┘")
+
+# 特に精度の良い日・悪い日の特定
+best_day = daily_df_phase9.loc[daily_df_phase9['mape'].idxmin()]
+worst_day = daily_df_phase9.loc[daily_df_phase9['mape'].idxmax()]
+
+print(f"\n🏆 Phase 9最高精度日:")
+print(f"  Day {best_day['day']} ({best_day['date']}): MAPE {best_day['mape']:.2f}%")
+
+print(f"\n📉 Phase 9最低精度日:")
+print(f"  Day {worst_day['day']} ({worst_day['date']}): MAPE {worst_day['mape']:.2f}%")
+
+# 段階的予測との比較準備（結果をCSV出力）
+daily_df_phase9.to_csv('phase9_daily_results.csv', index=False, encoding='utf-8')
+print(f"\n💾 Phase 9日別結果をphase9_daily_results.csvに保存完了")
+
+print(f"\n✅ Phase 9日別分析完了")
+print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+# %%
+# 6月1日の欠損値確認
+june_1_data = test_data_month[test_data_month['datetime'].dt.date == pd.to_datetime('2025-06-01').date()]
+
+print(f"\n🔍 6月1日データ確認:")
+print(f"dropna前の6月1日データ件数: {len(june_1_data)}")
+
+if len(june_1_data) > 0:
+    print(f"\n6月1日の欠損値状況:")
+    missing_info = june_1_data[features].isnull().sum()
+    for feature, missing_count in missing_info.items():
+        if missing_count > 0:
+            print(f"  {feature}: {missing_count}件欠損")
+    
+    # dropna後の確認
+    june_1_clean = june_1_data.dropna(subset=features)
+    print(f"\ndropna後の6月1日データ件数: {len(june_1_clean)}")
+else:
+    print("6月1日のデータ自体が存在しません")

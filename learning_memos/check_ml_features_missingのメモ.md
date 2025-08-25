@@ -17,7 +17,8 @@
             - 元のカラム一覧に存在するか確認して、存在するのであれば
               - dfをコピーした df_with_missing を作成
               - isnull()ですべてのセルのチェックをブーリアンで返して
-              - any(axis=1)で行ごと(日付ごと)に欠損があるかチェック
+                - any(axis=1)で行ごと(日付ごと)に欠損があるかチェック
+              - missing_cells_by_date で日別の欠損値数を集計
               - df_with_missing['date_column']をdatetimeに変換
               - missing_by_date で df_with_missing の欠損値の数を日別に集計
                 - 日別の欠損値が存在していたら見やすくして表示
