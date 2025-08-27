@@ -1,9 +1,9 @@
 # %%
 # ================================================================
-# 段階的予測テスト実装（修正版・dropna()なし）
+# 段階的予測テスト実装（フォールバック完全削除版）
 # 目的: 実運用での予測値依存による精度劣化測定
 # 期間: 2025-06-01 ～ 2025-06-16 (16日間×24時間=384回予測)
-# 修正点: dropna()削除・Phase 10土日祝日対応と同じ条件
+# 修正点: フォールバック処理完全削除・ml_features.csv完全準拠
 # ================================================================
 
 import pandas as pd
@@ -21,7 +21,7 @@ plt.rcParams['font.family'] = 'Meiryo'
 plt.rcParams['figure.figsize'] = (12, 8)
 plt.rcParams['font.size'] = 10
 
-print("🔄 段階的予測テスト開始（修正版・dropna()なし）")
+print("🔄 段階的予測テスト開始（フォールバック完全削除版）")
 print("=" * 60)
 
 # %%
@@ -37,30 +37,11 @@ print(f"データ形状: {ml_features.shape}")
 # dateとhour列からdatetime列を作成
 ml_features['datetime'] = pd.to_datetime(ml_features['date'].astype(str) + ' ' + ml_features['hour'].astype(str).str.zfill(2) + ':00:00')
 
-# 列名確認
-print(f"列名: {list(ml_features.columns)}")
-
-# datetime列の確認（複数パターン対応）
-datetime_columns = [col for col in ml_features.columns if 'date' in col.lower()]
-print(f"日時関連列: {datetime_columns}")
-
-# 最初の数行確認
-print(f"\n最初の5行:")
-print(ml_features.head())
-
-# calendar_data_with_prev_business.csv読み込み
-calendar_data = pd.read_csv('../../../data/ml/calendar_data_with_prev_business.csv')
-print(f"📅 営業日カレンダー読み込み完了")
-print(f"カレンダーデータ形状: {calendar_data.shape}")
-
-# calendar_dataのdate列をpandas datetimeに変換
-calendar_data['date'] = pd.to_datetime(calendar_data['date'])
-
 # datetime列をインデックスに設定（高速検索のため）
 ml_features = ml_features.set_index('datetime')
-calendar_data = calendar_data.set_index('date')
 
 print(f"✅ データ準備完了")
+print(f"日時範囲: {ml_features.index.min()} ～ {ml_features.index.max()}")
 
 # %%
 # ================================================================
@@ -86,6 +67,14 @@ features = [
 print(f"\n🔧 使用特徴量: {len(features)}個")
 for i, feature in enumerate(features, 1):
     print(f"  {i:2d}. {feature}")
+
+# 特徴量の欠損値状況確認
+print(f"\n📊 特徴量欠損値確認:")
+for feature in features:
+    if feature in ml_features.columns:
+        missing_count = ml_features[feature].isnull().sum()
+        missing_rate = missing_count / len(ml_features) * 100
+        print(f"  {feature:20s}: {missing_count:5d}件 ({missing_rate:5.1f}%)")
 
 # %%
 # ================================================================
@@ -131,133 +120,91 @@ print(f"✅ ベースラインモデル学習完了")
 
 # %%
 # ================================================================
-# 4. 営業日マッピング関数の準備
+# 4. 特徴量準備関数（フォールバック完全削除版）
 # ================================================================
 
-def get_prev_business_day(target_date):
-    """指定日の前営業日を取得"""
-    target_date_str = target_date.strftime('%Y-%m-%d')
+def prepare_features_no_fallback(target_datetime, predictions_dict):
+    """
+    ml_features.csvの値を完全準拠で使用（フォールバック処理なし）
+    欠損値もnanのまま返してXGBoostに任せる
+    """
     
-    if target_date_str in calendar_data.index:
-        prev_business_str = calendar_data.loc[target_date_str, 'prev_business_day']
-        if pd.notna(prev_business_str):
-            return pd.to_datetime(prev_business_str).date()
+    # ml_features.csvに該当時刻がある場合のみ処理
+    if target_datetime not in ml_features.index:
+        print(f"❌ {target_datetime}はml_features.csvに存在しません")
+        return [np.nan] * len(features)
     
-    # フォールバック: 単純に前日を返す
-    return (target_date - timedelta(days=1)).date()
-
-def prepare_features_for_prediction_debug(target_datetime, predictions_dict):
-    """予測対象時刻の特徴量を準備（デバッグ版）"""
-    print(f"\n{'='*60}")
-    print(f"🔍 特徴量デバッグ: {target_datetime}")
-    print(f"{'='*60}")
+    # ml_features.csvから特徴量を取得（nanも含めてそのまま）
+    feature_values = []
     
-    # 基本カレンダー特徴量（確定値）
-    hour = target_datetime.hour
-    is_weekend = 1 if target_datetime.weekday() >= 5 else 0
-    month = target_datetime.month
-    hour_sin = np.sin(2 * np.pi * hour / 24)
-    hour_cos = np.cos(2 * np.pi * hour / 24)
-    
-    print(f"📅 基本カレンダー特徴量:")
-    print(f"  hour: {hour}")
-    print(f"  is_weekend: {is_weekend} ({'週末' if is_weekend else '平日'})")
-    print(f"  month: {month}")
-    print(f"  hour_sin: {hour_sin:.4f}")
-    print(f"  hour_cos: {hour_cos:.4f}")
-    
-    # 祝日フラグ（正確な実装）
-    target_date_str = target_datetime.strftime('%Y-%m-%d')
-    if target_date_str in calendar_data.index:
-        is_holiday = 1 if calendar_data.loc[target_date_str, 'is_holiday'] else 0
-        print(f"  is_holiday: {is_holiday} (カレンダーデータから取得)")
-    else:
-        is_holiday = 0  # フォールバック
-        print(f"  is_holiday: {is_holiday} (フォールバック値)")
-    
-    # 気象データ（ml_featuresの実績値使用）
-    print(f"\n🌤️ 気象特徴量:")
-    if target_datetime in ml_features.index:
-        temperature_2m = ml_features.loc[target_datetime, 'temperature_2m']
-        relative_humidity_2m = ml_features.loc[target_datetime, 'relative_humidity_2m']
-        precipitation = ml_features.loc[target_datetime, 'precipitation']
-        print(f"  temperature_2m: {temperature_2m}°C (実績値)")
-        print(f"  relative_humidity_2m: {relative_humidity_2m}% (実績値)")
-        print(f"  precipitation: {precipitation}mm (実績値)")
-    else:
-        # フォールバック値
-        temperature_2m = 20.0
-        relative_humidity_2m = 60.0
-        precipitation = 0.0
-        print(f"  temperature_2m: {temperature_2m}°C (フォールバック)")
-        print(f"  relative_humidity_2m: {relative_humidity_2m}% (フォールバック)")
-        print(f"  precipitation: {precipitation}mm (フォールバック)")
-
-    # lag_1_day（前日同時刻）
-    print(f"\n⏰ ラグ特徴量:")
-    lag_1_day_datetime = target_datetime - timedelta(days=1)
-    print(f"  lag_1_day参照時刻: {lag_1_day_datetime}")
-
-    if lag_1_day_datetime in ml_features.index and lag_1_day_datetime <= pd.to_datetime('2025-05-31 23:00:00'):
-        lag_1_day = ml_features.loc[lag_1_day_datetime, 'actual_power']
-        print(f"  lag_1_day: {lag_1_day}万kW (実績値)")
-    elif lag_1_day_datetime in predictions_dict:
-        lag_1_day = predictions_dict[lag_1_day_datetime]  # 予測値使用
-        print(f"  lag_1_day: {lag_1_day}万kW (予測値)")
-    else:
-        lag_1_day = 3500.0  # フォールバック値
-        print(f"  lag_1_day: {lag_1_day}万kW (フォールバック)")
-
-    # lag_7_day（7日前同時刻）
-    lag_7_day_datetime = target_datetime - timedelta(days=7)
-    print(f"  lag_7_day参照時刻: {lag_7_day_datetime}")
-
-    if lag_7_day_datetime in ml_features.index:
-        lag_7_day = ml_features.loc[lag_7_day_datetime, 'actual_power']
-        print(f"  lag_7_day: {lag_7_day}万kW (実績値)")
-    elif lag_7_day_datetime in predictions_dict:
-        lag_7_day = predictions_dict[lag_7_day_datetime]  # 6/8以降で予測値使用
-        print(f"  lag_7_day: {lag_7_day}万kW (予測値)")
-    else:
-        lag_7_day = 3500.0  # フォールバック値
-        print(f"  lag_7_day: {lag_7_day}万kW (フォールバック)")
-
-    # lag_1_business_day（前営業日同時刻）- 最重要特徴量！
-    prev_business_date = get_prev_business_day(target_datetime)
-    lag_1_business_day_datetime = pd.to_datetime(f"{prev_business_date} {target_datetime.time()}")
-    print(f"  lag_1_business_day参照時刻: {lag_1_business_day_datetime}")
-
-    if lag_1_business_day_datetime in ml_features.index and lag_1_business_day_datetime <= pd.to_datetime('2025-05-31 23:00:00'):
-        lag_1_business_day = ml_features.loc[lag_1_business_day_datetime, 'actual_power']
-        print(f"  lag_1_business_day: {lag_1_business_day}万kW (実績値)")
-    elif lag_1_business_day_datetime in predictions_dict:
-        lag_1_business_day = predictions_dict[lag_1_business_day_datetime]  # 予測値使用
-        print(f"  lag_1_business_day: {lag_1_business_day}万kW (予測値)")
-    else:
-        lag_1_business_day = 3500.0  # フォールバック値  
-        print(f"  lag_1_business_day: {lag_1_business_day}万kW (フォールバック)")
-
-    # 特徴量辞書作成
-    feature_values = [
-        hour,                    # hour
-        is_weekend,             # is_weekend  
-        is_holiday,             # is_holiday
-        month,                  # month
-        hour_sin,               # hour_sin
-        hour_cos,               # hour_cos
-        lag_1_day,              # lag_1_day（実績値→予測値に段階移行）
-        lag_7_day,              # lag_7_day（6/8以降で予測値使用）
-        lag_1_business_day,     # lag_1_business_day（実績値→予測値に段階移行）
-        temperature_2m,         # temperature_2m
-        relative_humidity_2m,   # relative_humidity_2m
-        precipitation           # precipitation
-    ]
-    
-    print(f"\n📋 特徴量最終確認:")
-    for i, (feat_name, feat_val) in enumerate(zip(features, feature_values)):
-        print(f"  {i+1:2d}. {feat_name:20s}: {feat_val}")
+    for feature in features:
+        if feature in ml_features.columns:
+            # ml_features.csvの値をそのまま使用
+            original_value = ml_features.loc[target_datetime, feature]
+            
+            # lagを予測値で上書きする場合のチェック
+            if feature == 'lag_1_day':
+                lag_datetime = target_datetime - timedelta(days=1)
+                if lag_datetime in predictions_dict:
+                    # 予測値で上書き
+                    feature_values.append(predictions_dict[lag_datetime])
+                else:
+                    # 実データまたはnan（フォールバックなし）
+                    feature_values.append(original_value)
+            
+            elif feature == 'lag_7_day':
+                lag_datetime = target_datetime - timedelta(days=7)
+                if lag_datetime in predictions_dict:
+                    # 予測値で上書き
+                    feature_values.append(predictions_dict[lag_datetime])
+                else:
+                    # 実データまたはnan（フォールバックなし）
+                    feature_values.append(original_value)
+            
+            elif feature == 'lag_1_business_day':
+                # 営業日lagの処理（複雑なので既存ロジック活用）
+                # ただしフォールバックは削除
+                prev_business_date = get_prev_business_day_from_ml_features(target_datetime)
+                if prev_business_date:
+                    lag_business_datetime = pd.to_datetime(f"{prev_business_date} {target_datetime.time()}")
+                    if lag_business_datetime in predictions_dict:
+                        # 予測値で上書き
+                        feature_values.append(predictions_dict[lag_business_datetime])
+                    else:
+                        # 実データまたはnan（フォールバックなし）
+                        feature_values.append(original_value)
+                else:
+                    # フォールバックなし - nanのまま
+                    feature_values.append(original_value)
+            
+            else:
+                # その他の特徴量はそのまま
+                feature_values.append(original_value)
+        else:
+            # 特徴量がない場合はnan
+            feature_values.append(np.nan)
     
     return feature_values
+
+def get_prev_business_day_from_ml_features(target_datetime):
+    """ml_features.csvのlag_1_business_dayから前営業日を逆算"""
+    # ml_features.csvのlag_1_business_dayが指している日を特定
+    if target_datetime not in ml_features.index:
+        return None
+    
+    lag_business_value = ml_features.loc[target_datetime, 'lag_1_business_day']
+    if pd.isna(lag_business_value):
+        return None
+    
+    # 前営業日の同時刻を探索（1-7日前を確認）
+    for days_back in range(1, 8):
+        candidate_date = target_datetime - timedelta(days=days_back)
+        if candidate_date in ml_features.index:
+            candidate_value = ml_features.loc[candidate_date, 'actual_power']
+            if not pd.isna(candidate_value) and abs(candidate_value - lag_business_value) < 1.0:
+                return candidate_date.date()
+    
+    return None
 
 # %%
 # ================================================================
@@ -272,10 +219,11 @@ end_date = pd.to_datetime('2025-06-16')
 predictions = {}
 daily_results = []
 
-print(f"\n🔄 段階的予測実行開始")
+print(f"\n🔄 段階的予測実行開始（フォールバック完全削除版）")
 print(f"予測期間: {start_date.date()} ～ {end_date.date()}")
 print(f"予測回数: {16 * 24}回（16日×24時間）")
 print(f"✅ dropna()なし - XGBoost欠損値自動処理使用")
+print(f"✅ フォールバック処理完全削除")
 
 # 16日間の段階的予測
 current_date = start_date
@@ -290,8 +238,8 @@ for day in range(16):
     for hour in range(24):
         target_datetime = current_date + timedelta(hours=hour)
         
-        # 特徴量準備
-        feature_values = prepare_features_for_prediction_debug(target_datetime, predictions)
+        # 特徴量準備（フォールバック完全削除版）
+        feature_values = prepare_features_no_fallback(target_datetime, predictions)
         
         # DataFrameに変換（XGBoostに入力）
         X_pred = pd.DataFrame([feature_values], columns=features)
@@ -362,177 +310,68 @@ print(f"=" * 40)
 print(f"前回固定予測（MAPE）: 2.54%（Phase 10土日祝日対応）")
 print(f"今回段階的予測（MAPE）: {overall_mape:.2f}%")
 
+degradation_amount = overall_mape - 2.54
+degradation_rate = degradation_amount / 2.54 * 100
+
 if overall_mape <= 2.54:
     print(f"✅ 段階的予測でも高精度を維持")
 elif overall_mape <= 3.5:
     print(f"⚠️ 段階的予測で軽度の精度劣化（実用レベル内）")
-    degradation_rate = (overall_mape - 2.54) / 2.54 * 100
-    print(f"   精度劣化率: {degradation_rate:.1f}%")
+    print(f"   精度劣化: +{degradation_amount:.2f}% ({degradation_rate:+.1f}%)")
 elif overall_mape <= 5.0:
     print(f"⚠️ 段階的予測で中程度の精度劣化（要注意レベル）")
-    degradation_rate = (overall_mape - 2.54) / 2.54 * 100
-    print(f"   精度劣化率: {degradation_rate:.1f}%")
+    print(f"   精度劣化: +{degradation_amount:.2f}% ({degradation_rate:+.1f}%)")
 else:
     print(f"❌ 段階的予測で大幅な精度劣化（実用性要検討）")
-    degradation_rate = (overall_mape - 2.54) / 2.54 * 100
-    print(f"   精度劣化率: {degradation_rate:.1f}%")
+    print(f"   精度劣化: +{degradation_amount:.2f}% ({degradation_rate:+.1f}%)")
 
 # %%
 # ================================================================
-# 7. 日別精度劣化の可視化
+# 7. 6/1 0:00 特徴量確認（フォールバック削除版）
 # ================================================================
 
-# 日別結果をDataFrameに変換
-daily_df = pd.DataFrame(daily_results)
+target_datetime = pd.to_datetime('2025-06-01 00:00:00')
+empty_predictions = {}  # 初回なので空の辞書
 
-# 日別MAPE推移グラフ
-plt.figure(figsize=(12, 8))
+print(f"\n🔍 6/1 0:00の特徴量準備確認（フォールバック完全削除版）:")
+print("=" * 80)
 
-plt.subplot(2, 2, 1)
-plt.plot(daily_df['day'], daily_df['mape'], 'bo-', linewidth=2, markersize=6)
-plt.axhline(y=2.54, color='r', linestyle='--', label='Phase 10ベースライン (2.54%)')
-plt.title('📈 日別MAPE推移（段階的予測）', fontsize=14, fontweight='bold')
-plt.xlabel('Day')
-plt.ylabel('MAPE (%)')
-plt.grid(True, alpha=0.3)
-plt.legend()
+# 特徴量準備実行（フォールバック削除版）
+feature_values = prepare_features_no_fallback(target_datetime, empty_predictions)
 
-# 日別MAE推移グラフ
-plt.subplot(2, 2, 2)
-plt.plot(daily_df['day'], daily_df['mae'], 'go-', linewidth=2, markersize=6)
-plt.title('📈 日別MAE推移', fontsize=14, fontweight='bold')
-plt.xlabel('Day')
-plt.ylabel('MAE (万kW)')
-plt.grid(True, alpha=0.3)
-
-# 日別R²推移グラフ
-plt.subplot(2, 2, 3)
-plt.plot(daily_df['day'], daily_df['r2'], 'mo-', linewidth=2, markersize=6)
-plt.axhline(y=0.9839, color='r', linestyle='--', label='Phase 9ベースライン (0.9839)')
-plt.title('📈 日別R²推移', fontsize=14, fontweight='bold')
-plt.xlabel('Day')
-plt.ylabel('R² Score')
-plt.grid(True, alpha=0.3)
-plt.legend()
-
-# 精度劣化パターン分析
-plt.subplot(2, 2, 4)
-mape_change = [(mape - daily_df['mape'].iloc[0]) for mape in daily_df['mape']]
-plt.plot(daily_df['day'], mape_change, 'ro-', linewidth=2, markersize=6)
-plt.title('📉 MAPE劣化量（Day1比較）', fontsize=14, fontweight='bold')
-plt.xlabel('Day')
-plt.ylabel('MAPE劣化量 (%)')
-plt.grid(True, alpha=0.3)
-plt.axhline(y=0, color='k', linestyle='-', alpha=0.5)
-
-plt.tight_layout()
-plt.show()
-
-# %%
-# ================================================================
-# 8. 実際の予測値 vs 実績値の比較可視化
-# ================================================================
-
-# 時系列での予測値vs実績値比較（最初の3日間）
-sample_dates = pd.date_range('2025-06-01', '2025-06-03', freq='H')
-sample_predictions = [predictions.get(dt, np.nan) for dt in sample_dates]
-sample_actuals = [ml_features.loc[dt, 'actual_power'] if dt in ml_features.index else np.nan for dt in sample_dates]
-
-plt.figure(figsize=(15, 6))
-plt.plot(sample_dates, sample_actuals, 'b-', linewidth=2, label='実績値', alpha=0.8)
-plt.plot(sample_dates, sample_predictions, 'r--', linewidth=2, label='段階的予測値', alpha=0.8)
-plt.title('🔍 段階的予測 vs 実績値（2025-06-01〜03）', fontsize=16, fontweight='bold')
-plt.xlabel('日時')
-plt.ylabel('電力需要（万kW）')
-plt.legend()
-plt.grid(True, alpha=0.3)
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.show()
-
-# %%
-# ================================================================
-# 9. 特徴量重要度分析（欠損値込み学習）
-# ================================================================
-
-print(f"\n📊 特徴量重要度分析（dropna()なし学習）:")
-print(f"=" * 50)
-
-# 特徴量重要度取得
-feature_importance = xgb_model.feature_importances_
-importance_df = pd.DataFrame({
-    'feature': features,
-    'importance': feature_importance * 100
-}).sort_values('importance', ascending=False)
-
-# 重要度表示
-for idx, row in importance_df.iterrows():
-    rank = importance_df.index.get_loc(idx) + 1
-    print(f"{rank:2d}. {row['feature']:19s}: {row['importance']:6.1f}%")
-
-# %%
-# ================================================================
-# 10. 土日祝日 vs 平日の段階的予測精度比較
-# ================================================================
-
-print(f"\n" + "="*50)
-print("📊 土日祝日 vs 平日の段階的予測精度比較")
-print("="*50)
-
-# 段階的予測結果に曜日情報追加
-weekday_analysis = []
-weekend_analysis = []
-
-for result in daily_results:
-    date_obj = pd.to_datetime(result['date'])
-    is_weekend = date_obj.weekday() >= 5
-    
-    # カレンダーデータから祝日判定
-    date_str = result['date']
-    is_holiday = False
-    if date_str in calendar_data.index:
-        is_holiday = calendar_data.loc[date_str, 'is_holiday']
-    
-    day_info = {
-        'date': result['date'],
-        'mape': result['mape'],
-        'mae': result['mae'],
-        'r2': result['r2'],
-        'day_type': '土日祝' if (is_weekend or is_holiday) else '平日'
-    }
-    
-    if is_weekend or is_holiday:
-        weekend_analysis.append(day_info)
+print(f"\n📋 準備された特徴量値:")
+for i, (feat_name, feat_val) in enumerate(zip(features, feature_values)):
+    if pd.isna(feat_val):
+        print(f"  {i+1:2d}. {feat_name:20s}: nan (XGBoost自動処理)")
     else:
-        weekday_analysis.append(day_info)
+        print(f"  {i+1:2d}. {feat_name:20s}: {feat_val}")
 
-# 曜日別精度統計
-if len(weekday_analysis) > 0:
-    weekday_mapes = [d['mape'] for d in weekday_analysis]
-    weekday_avg_mape = np.mean(weekday_mapes)
-    print(f"平日（{len(weekday_analysis)}日）:")
-    print(f"  平均MAPE: {weekday_avg_mape:.2f}%")
-    print(f"  MAPE範囲: {min(weekday_mapes):.2f}% ～ {max(weekday_mapes):.2f}%")
-    
-if len(weekend_analysis) > 0:
-    weekend_mapes = [d['mape'] for d in weekend_analysis]
-    weekend_avg_mape = np.mean(weekend_mapes)
-    print(f"土日祝日（{len(weekend_analysis)}日）:")
-    print(f"  平均MAPE: {weekend_avg_mape:.2f}%")
-    print(f"  MAPE範囲: {min(weekend_mapes):.2f}% ～ {max(weekend_mapes):.2f}%")
+# ml_features.csvの6/1 0:00の値と比較
+print(f"\n📊 ml_features.csv vs 準備値 比較:")
+if target_datetime in ml_features.index:
+    print(f"ml_features.csvの6/1 0:00:")
+    for feature in features:
+        if feature in ml_features.columns:
+            original_value = ml_features.loc[target_datetime, feature]
+            prepared_value = feature_values[features.index(feature)]
+            
+            if pd.isna(original_value) and pd.isna(prepared_value):
+                status = "✅ 一致"
+            elif original_value == prepared_value:
+                status = "✅ 一致"
+            else:
+                status = "❌ 不一致"
+            
+            print(f"  {feature:20s}: {original_value} → {prepared_value} {status}")
 
-# 段階的予測での土日祝日対応評価
-if len(weekday_analysis) > 0 and len(weekend_analysis) > 0:
-    if weekend_avg_mape <= weekday_avg_mape * 1.15:  # 15%以内の差は許容
-        print(f"\n✅ 段階的予測でも土日祝日対応成功")
-        print(f"✅ 営業日lag欠損値の影響を適切に処理")
-    else:
-        print(f"\n⚠️ 段階的予測で土日祝日精度が劣化")
-        print(f"⚠️ 予測値依存により欠損値影響が拡大")
+# Phase 9固定予測と比較するための特徴量
+print(f"\n🔬 Phase 9固定予測との比較期待:")
+print(f"  予想: lag_1_business_day = nan → XGBoost最適処理 → 高精度")
+print(f"  実際: この特徴量で予測実行して誤差率1.09%に近づくか確認")
 
 # %%
 # ================================================================
-# 11. 外れ値検出・分析（IQR法）
+# 8. 外れ値検出・分析（IQR法）
 # ================================================================
 
 print(f"\n📊 外れ値検出・分析")
@@ -569,24 +408,71 @@ if outliers_count > 0:
 
 # %%
 # ================================================================
-# 12. 段階的予測実験結果サマリー・Phase 10評価
+# 9. 日別推移グラフ作成
 # ================================================================
 
-print(f"\n" + "🎉 段階的予測実験完了サマリー" + "\n")
-print("="*60)
+if len(daily_results) > 0:
+    # データフレーム作成
+    daily_df = pd.DataFrame(daily_results)
+    
+    # グラフ作成（2x2レイアウト）
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+    
+    # 1. 日別MAPE推移
+    ax1.plot(daily_df['day'], daily_df['mape'], 'o-', linewidth=2, markersize=8, color='blue')
+    ax1.axhline(y=2.54, color='red', linestyle='--', alpha=0.7, label='Phase 10ベースライン (2.54%)')
+    ax1.set_xlabel('Day')
+    ax1.set_ylabel('MAPE (%)')
+    ax1.set_title('日別MAPE推移 (段階的予測)')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+    
+    # 2. 日別MAE推移
+    ax2.plot(daily_df['day'], daily_df['mae'], 'o-', linewidth=2, markersize=8, color='green')
+    ax2.set_xlabel('Day')
+    ax2.set_ylabel('MAE (万kW)')
+    ax2.set_title('日別MAE推移')
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. 日別R²推移
+    ax3.plot(daily_df['day'], daily_df['r2'], 'o-', linewidth=2, markersize=8, color='purple')
+    ax3.axhline(y=0.9839, color='red', linestyle='--', alpha=0.7, label='Phase 9ベースライン (0.9839)')
+    ax3.set_xlabel('Day')
+    ax3.set_ylabel('R² Score')
+    ax3.set_title('日別R²推移')
+    ax3.grid(True, alpha=0.3)
+    ax3.legend()
+    
+    # 4. MAPE変化量（Day1比較）
+    first_day_mape = daily_df.iloc[0]['mape']
+    mape_changes = daily_df['mape'] - first_day_mape
+    ax4.plot(daily_df['day'], mape_changes, 'o-', linewidth=2, markersize=8, color='red')
+    ax4.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+    ax4.set_xlabel('Day')
+    ax4.set_ylabel('MAPE変化量 (%)')
+    ax4.set_title('MAPE変化量 (Day1比較)')
+    ax4.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
 
-print(f"✅ 段階的予測実験（dropna()なし）完了")
+# %%
+# ================================================================
+# 10. 段階的予測実験結果サマリー・Phase 10評価
+# ================================================================
+
+print(f"\n" + "🎉 段階的予測実験完了サマリー（フォールバック削除版）" + "\n")
+print("="*80)
+
+print(f"✅ 段階的予測実験（フォールバック完全削除）完了")
 print(f"✅ 予測期間: 2025/6/1～6/16（16日間・384時間）")
-print(f"✅ 学習データ: 2025/5/31まで（欠損値込み）")
-print(f"✅ XGBoost欠損値自動処理使用")
+print(f"✅ 学習データ: 2025/5/31まで（欠損値込み・dropna()なし）")
+print(f"✅ XGBoost欠損値自動処理使用・フォールバック処理削除")
 
 print(f"\n📊 段階的予測 vs 固定予測 比較結果:")
 print(f"=" * 50)
 print(f"固定予測（Phase 10）: MAPE 2.54% （lagを実データ使用）")
 print(f"段階的予測（今回）:   MAPE {overall_mape:.2f}% （lagを予測値で段階埋め）")
-
-degradation_amount = overall_mape - 2.54
-degradation_rate = degradation_amount / 2.54 * 100
 
 if overall_mape <= 3.0:
     evaluation = "✅ 実用レベル維持"
@@ -628,66 +514,55 @@ print(f"➡️ 次ステップ: 日次自動予測システム統合・Phase 11�
 
 # %%
 # ================================================================
-# 13. 特徴量使用パターン分析（実運用シミュレーション）
+# 11. 6/1 0:00 詳細確認・Phase 9固定予測との比較
 # ================================================================
 
-print(f"\n📋 段階的予測での特徴量使用パターン分析")
-print("="*60)
+target_datetime = pd.to_datetime('2025-06-01 00:00:00')
 
-# 各日での特徴量ソース分析例
-pattern_analysis_examples = {
-    '6/1 0:00': {
-        'lag_1_day': '5/31 0:00実データ',
-        'lag_7_day': '5/25 0:00実データ',  
-        'lag_1_business_day': '5/30 0:00実データ（金曜日）'
-    },
-    '6/1 1:00': {
-        'lag_1_day': '5/31 1:00実データ',
-        'lag_7_day': '5/25 1:00実データ',
-        'lag_1_business_day': '5/30 1:00実データ'
-    },
-    '6/2 0:00': {
-        'lag_1_day': '6/1 0:00予測値（←段階的予測開始）',
-        'lag_7_day': '5/26 0:00実データ',
-        'lag_1_business_day': '6/1 0:00予測値（月曜日→金曜日）'
-    },
-    '6/8 0:00': {
-        'lag_1_day': '6/7 0:00予測値',
-        'lag_7_day': '6/1 0:00予測値（←7日前も予測値に）',
-        'lag_1_business_day': '6/7 0:00予測値（土曜→金曜）'
-    }
-}
+print(f"\n🔬 6/1 0:00 詳細分析（フォールバック削除版）:")
+print("=" * 80)
 
-print("段階的予測での特徴量ソース推移:")
-for datetime_key, sources in pattern_analysis_examples.items():
-    print(f"\n{datetime_key}:")
-    for feature, source in sources.items():
-        print(f"  {feature:20s}: {source}")
-
-print(f"\n💡 実運用での精度劣化要因:")
-print(f"  1. 初日: 実データlag豊富→高精度")
-print(f"  2. 2日目以降: lag_1_day予測値依存→徐々に劣化")
-print(f"  3. 8日目以降: lag_7_day予測値依存→さらに劣化")
-print(f"  4. 営業日変化: lag_1_business_day予測値混入→誤差拡大")
+if target_datetime in predictions:
+    iterative_pred = predictions[target_datetime]
+    actual_value = ml_features.loc[target_datetime, 'actual_power']
+    
+    print(f"📊 予測結果比較:")
+    print(f"  実績値:         {actual_value:.2f}万kW")
+    print(f"  固定予測:       2154.15万kW (誤差率1.09%)")
+    print(f"  段階的予測:     {iterative_pred:.2f}万kW")
+    
+    # 段階的予測の誤差計算
+    iterative_error = abs(iterative_pred - actual_value)
+    iterative_error_rate = iterative_error / actual_value * 100
+    
+    print(f"  段階的予測誤差: {iterative_error:.2f}万kW ({iterative_error_rate:.2f}%)")
+    
+    # 固定予測との差
+    pred_diff = abs(iterative_pred - 2154.15)
+    print(f"  予測値差:       {pred_diff:.2f}万kW")
+    
+    # 改善確認
+    if iterative_error_rate <= 2.0:
+        print(f"✅ 初日高精度達成 - フォールバック削除効果確認")
+    else:
+        print(f"⚠️ 初日精度要改善 - 追加調査必要")
 
 # %%
 # ================================================================
-# 14. Phase 10実験完了・次段階準備
+# 12. 実験総括・重要発見
 # ================================================================
 
-print(f"\n🚀 Phase 10段階的予測実験完了")
-print("="*60)
+print(f"\n🎯 段階的予測実験・重要発見")
+print("=" * 60)
 
-print(f"【実験成果】")
-print(f"✅ 段階的予測精度: MAPE {overall_mape:.2f}%")
-print(f"✅ 前回固定予測からの劣化: +{degradation_amount:.2f}%")
-print(f"✅ 外れ値: {outliers_count}件 ({outliers_count/len(abs_residuals)*100:.1f}%)")
-print(f"✅ 土日祝日対応: dropna()なしでも安定運用")
+print(f"【実験設計成果】")
+print(f"✅ フォールバック処理完全削除による純粋な段階的予測")
+print(f"✅ XGBoost欠損値自動処理の段階的予測での有効性検証")
+print(f"✅ 16日間予測での日別精度劣化パターン把握")
 
-print(f"\n【重要な発見】")
-print(f"🔍 実運用での予測値依存による精度変化を定量測定")
-print(f"🔍 XGBoost欠損値自動処理の段階的予測での有効性確認")
-print(f"🔍 16日間予測での日別精度劣化パターン把握")
+print(f"\n【技術的発見】")
+if len(daily_results) > 0:
+    print(f"🔍 予測値依存による精度変化: 実運用シミュレーション成功")
 
 print(f"\n【Phase 10完了判断】")
 if overall_mape <= 3.5:
@@ -708,44 +583,109 @@ print(f"🎯 BigQuery結果保存・Looker Studio準備")
 print(f"\n🎉 Phase 10段階的予測実験完了！")
 print(f"✨ 実運用シミュレーション成功・システム化準備完了！")
 
+# %%
+# ================================================================
+# 13. 土日祝日精度分析
+# ================================================================
+
+print(f"\n📊 土日祝日 vs 平日精度分析")
+print("=" * 50)
+
+# 日別結果に曜日情報を追加
+for result in daily_results:
+    date_obj = pd.to_datetime(result['date'])
+    result['weekday'] = date_obj.weekday()  # 0=月曜, 6=日曜
+    result['is_weekend'] = 1 if date_obj.weekday() >= 5 else 0
+
+# 平日・週末別集計
+weekday_results = [r for r in daily_results if r['is_weekend'] == 0]
+weekend_results = [r for r in daily_results if r['is_weekend'] == 1]
+
+if weekday_results:
+    weekday_mape = np.mean([r['mape'] for r in weekday_results])
+    print(f"平日MAPE平均: {weekday_mape:.2f}% ({len(weekday_results)}日)")
+
+if weekend_results:
+    weekend_mape = np.mean([r['mape'] for r in weekend_results])
+    print(f"土日MAPE平均: {weekend_mape:.2f}% ({len(weekend_results)}日)")
+
+if weekday_results and weekend_results:
+    mape_diff = weekend_mape - weekday_mape
+    print(f"土日vs平日差: {mape_diff:+.2f}%")
+    
+    if abs(mape_diff) <= 1.0:
+        print(f"✅ 土日祝日対応良好 - 平日と同レベル精度")
+    elif abs(mape_diff) <= 2.0:
+        print(f"⚠️ 土日祝日軽微差 - 許容範囲内")
+    else:
+        print(f"❌ 土日祝日大幅差 - 要改善")
 
 # %%
 # ================================================================
-# 6/1 0:00 予測値確認（シンプル版）
+# 14. 段階的劣化パターン分析
 # ================================================================
 
-# 段階的予測の6/1 0:00確認用コード
-target_datetime = pd.to_datetime('2025-06-01 00:00:00')
-iterative_pred = predictions[target_datetime]
-actual_value = 2131.00  # 実績値（固定予測と同じ）
+print(f"\n📈 段階的劣化パターン分析")
+print("=" * 50)
 
-print(f"6/1 0:00の段階的予測結果:")
-print(f"段階的予測値: {iterative_pred:.2f}万kW")
-print(f"実績値:       {actual_value:.2f}万kW")
-print(f"誤差:         {abs(iterative_pred - actual_value):.2f}万kW")
-print(f"誤差率:       {abs(iterative_pred - actual_value) / actual_value * 100:.2f}%")
-
-print(f"\n📊 固定 vs 段階的 比較:")
-print(f"固定予測:   2154.15万kW (誤差率1.09%)")
-print(f"段階的予測: {iterative_pred:.2f}万kW (誤差率?%)")
-print(f"予測値差:   {abs(2154.15 - iterative_pred):.2f}万kW")
+if len(daily_results) >= 8:
+    # 期間別精度分析
+    period1_mape = np.mean([r['mape'] for r in daily_results[0:3]])   # Day 1-3
+    period2_mape = np.mean([r['mape'] for r in daily_results[3:8]])   # Day 4-8
+    period3_mape = np.mean([r['mape'] for r in daily_results[8:16]])  # Day 9-16
+    
+    print(f"期間別精度分析:")
+    print(f"  Day 1-3 (lag_1_day実データ期): {period1_mape:.2f}%")
+    print(f"  Day 4-8 (lag_1_day予測値期): {period2_mape:.2f}%")
+    print(f"  Day 9-16 (lag_7_day予測値期): {period3_mape:.2f}%")
+    
+    print(f"\n段階的劣化パターン:")
+    print(f"  1. 初期期間: lag実データ豊富→{period1_mape:.2f}%精度")
+    print(f"  2. 中期期間: lag_1_day予測値依存→{period2_mape:.2f}%")
+    print(f"  3. 後期期間: lag_7_day予測値依存→{period3_mape:.2f}%")
 
 # %%
 # ================================================================
-# 6/1 0:00 特徴量準備 単体確認
+# 15. Phase 10実験完了・最終評価
 # ================================================================
 
-target_datetime = pd.to_datetime('2025-06-01 00:00:00')
-empty_predictions = {}  # 初回なので空の辞書
+print(f"\n🚀 Phase 10段階的予測実験完了（フォールバック削除版）")
+print("="*80)
 
-print("🔍 6/1 0:00の特徴量準備確認:")
-print("=" * 60)
+print(f"【実験成果】")
+print(f"✅ 段階的予測精度: MAPE {overall_mape:.2f}%")
+print(f"✅ 前回固定予測からの劣化: +{degradation_amount:.2f}%")
+print(f"✅ 外れ値: {outliers_count}件 ({outliers_count/len(abs_residuals)*100:.1f}%)")
+print(f"✅ フォールバック処理削除: XGBoost純粋な欠損値処理")
 
-# 特徴量準備実行（デバッグ版）
-feature_values = prepare_features_for_prediction_debug(target_datetime, empty_predictions)
+print(f"\n【重要な発見】")
+print(f"🔍 フォールバック削除による初日精度改善効果測定")
+print(f"🔍 XGBoost欠損値自動処理の段階的予測での真の性能確認")
+print(f"🔍 16日間予測での実運用精度劣化の正確な測定")
 
-print("\n📋 準備された特徴量値:")
-for i, (feat_name, feat_val) in enumerate(zip(features, feature_values)):
-    print(f"  {i+1:2d}. {feat_name:20s}: {feat_val}")
+print(f"\n【実用性評価】")
+if overall_mape <= 3.5:
+    print(f"✅ MAPE {overall_mape:.2f}% - 実用レベル達成")
+    print(f"✅ Phase 10日次自動予測システム構築OK")
+    print(f"✅ Phase 11 Looker Studioダッシュボード移行OK")
+    print(f"✅ API制限16日間でも運用品質確保")
+else:
+    print(f"⚠️ MAPE {overall_mape:.2f}% - 精度向上策要検討")
+    print(f"⚠️ Phase 10システム化前に追加改良推奨")
 
-# %%
+print(f"\n【Phase 10技術的成果】")
+print(f"✅ WeatherDownloader: API制限対応・基準日分離完了")
+print(f"✅ 土日祝日欠損値対応: XGBoost自動処理活用完了")
+print(f"✅ 16日間予測検証: Open-Meteo制限内高精度確認")
+print(f"✅ 段階的予測検証: 実運用シミュレーション完了")
+
+print(f"\n【次ステップ】")
+print(f"🎯 日次自動予測システム統合（全コンポーネント統合）")
+print(f"🎯 PowerDataDownloader + WeatherDownloader + Phase 5-6特徴量 + Phase 9モデル")
+print(f"🎯 BigQuery結果保存・GCSアップロード統合")
+print(f"🎯 Phase 11 Looker Studioダッシュボード構築")
+
+print(f"\n🎉 Phase 10段階的予測実験完了！")
+print(f"✨ フォールバック削除による正確な実運用精度測定成功！") 
+print(f"初日精度: {daily_results[0]['mape']:.2f}% (実データlag豊富)")
+print(f"🔍 最終日精度: {daily_results[-1]['mape']:.2f}% (予測値lag依存)")

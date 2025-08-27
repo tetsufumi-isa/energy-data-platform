@@ -311,4 +311,30 @@ print(f"16日間予測精度: 実用レベル確認")
 print(f"XGBoost欠損値自動処理: 有効性実証")
 print(f"新ml_features.csv作成準備完了")
 
+
+# %%
+# ================================================================
+# phase9_no_dropna.py用 6/1 0:00確認コード（修正版）
+# ================================================================
+
+print("6/1 0:00の固定予測結果:")
+
+# test_dataの最初が6/1 0:00のはず（0番目）
+first_pred = y_pred[0]  # 予測値配列の最初
+first_actual = y_test.iloc[0]  # 実績値の最初
+first_datetime = test_data.index[0]  # 対応する日時
+
+print(f"予測対象時刻: {first_datetime}")
+print(f"固定予測値: {first_pred:.2f}万kW")
+print(f"実績値:     {first_actual:.2f}万kW")
+print(f"誤差:       {abs(first_pred - first_actual):.2f}万kW")
+print(f"誤差率:     {abs(first_pred - first_actual) / first_actual * 100:.2f}%")
+
+# %%
+# phase9_no_dropna.pyの最後に追加
+first_row_features = test_data.iloc[0][features]
+print("phase9の6/1 0:00特徴量:")
+for i, (feat_name, feat_val) in enumerate(zip(features, first_row_features)):
+    print(f"  {i+1:2d}. {feat_name:20s}: {feat_val}")
+
 # %%
