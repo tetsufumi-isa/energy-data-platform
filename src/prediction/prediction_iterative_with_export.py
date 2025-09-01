@@ -63,10 +63,10 @@ plt.rcParams['font.family'] = 'Meiryo'
 plt.rcParams['figure.figsize'] = (12, 8)
 plt.rcParams['font.size'] = 10
 
-logger.info("🔄 段階的予測実験開始（保存機能付き・dropna()なし）")
+logger.info("段階的予測実験開始（保存機能付き・dropna()なし）")
 logger.info("=" * 60)
-logger.info(f"📋 ログファイル: {log_file_path}")
-print("🔄 段階的予測テスト開始（保存機能付き・dropna()なし）")
+logger.info(f"ログファイル: {log_file_path}")
+print("段階的予測テスト開始（保存機能付き・dropna()なし）")
 print("=" * 60)
 
 # %%
@@ -74,24 +74,29 @@ print("=" * 60)
 # 1. データ読み込み・基本確認
 # ================================================================
 
+# 環境変数からベースパスを取得
+energy_env_path = os.getenv('ENERGY_ENV_PATH', '.')
+
 # ml_features.csvの読み込み
-ml_features = pd.read_csv('../../../data/ml/ml_features.csv')
-print(f"📊 データ読み込み完了")
+ml_features_path = Path(energy_env_path) / 'data' / 'ml' / 'ml_features.csv'
+ml_features = pd.read_csv(ml_features_path)
+print(f"データ読み込み完了")
 print(f"データ形状: {ml_features.shape}")
 
 # dateとhour列からdatetime列を作成
 ml_features['datetime'] = pd.to_datetime(ml_features['date'].astype(str) + ' ' + ml_features['hour'].astype(str).str.zfill(2) + ':00:00')
 
 # calendar_data_with_prev_business.csv読み込み
-calendar_data = pd.read_csv('../../../data/ml/calendar_data_with_prev_business.csv')
-print(f"📅 営業日カレンダー読み込み完了")
+calendar_data_path = Path(energy_env_path) / 'data' / 'ml' / 'calendar_data_with_prev_business.csv'
+calendar_data = pd.read_csv(calendar_data_path)
+print(f"営業日カレンダー読み込み完了")
 
 # datetime列をインデックスに設定（高速検索のため）
 ml_features = ml_features.set_index('datetime')
 calendar_data['date'] = pd.to_datetime(calendar_data['date'])
 calendar_data = calendar_data.set_index('date')
 
-print(f"✅ データ準備完了")
+print(f"データ準備完了")
 
 # %%
 # ================================================================
@@ -114,7 +119,7 @@ features = [
     'precipitation'           # 降水量
 ]
 
-print(f"\n🔧 使用特徴量: {len(features)}個")
+print(f"\n使用特徴量: {len(features)}個")
 for i, feature in enumerate(features, 1):
     print(f"  {i:2d}. {feature}")
 
@@ -131,7 +136,7 @@ train_data = ml_features[ml_features.index <= train_end_date].copy()
 X_train = train_data[features]
 y_train = train_data['actual_power']
 
-print(f"\n🤖 XGBoostモデル学習開始")
+print(f"\nXGBoostモデル学習開始")
 print(f"学習データ: {len(X_train):,}件（欠損値込み）")
 print(f"学習期間: {train_data.index.min()} ～ {train_data.index.max()}")
 
@@ -145,10 +150,10 @@ xgb_model = xgb.XGBRegressor(
 )
 
 # モデル学習
-logger.info("🤖 XGBoostモデル学習開始")
+logger.info("XGBoostモデル学習開始")
 xgb_model.fit(X_train, y_train)
-logger.info("✅ XGBoostモデル学習完了")
-print("🤖 XGBoostモデル学習完了")
+logger.info("XGBoostモデル学習完了")
+print("XGBoostモデル学習完了")
 
 # %%
 # ================================================================
@@ -213,13 +218,13 @@ end_date = pd.to_datetime('2025-06-16')
 predictions = {}
 daily_results = []
 
-logger.info("🔄 段階的予測実行開始（フォールバック完全削除版）")
+logger.info("段階的予測実行開始（フォールバック完全削除版）")
 logger.info(f"予測期間: {start_date.date()} ～ {end_date.date()}")
 logger.info(f"予測回数: {16 * 24}回（16日×24時間）")
-logger.info("✅ dropna()なし - XGBoost欠損値自動処理使用")
-logger.info("✅ フォールバック処理完全削除")
+logger.info("dropna()なし - XGBoost欠損値自動処理使用")
+logger.info("フォールバック処理完全削除")
 
-print(f"\n🔄 段階的予測実行開始（フォールバック完全削除版）")
+print(f"\n段階的予測実行開始（フォールバック完全削除版）")
 print(f"予測期間: {start_date.date()} ～ {end_date.date()}")
 print(f"予測回数: {16 * 24}回（16日×24時間）")
 
@@ -230,7 +235,7 @@ for day in range(16):
     daily_predictions = []
     daily_actuals = []
     
-    print(f"\n📅 Day {day+1}: {current_date.strftime('%Y-%m-%d')}")
+    print(f"\nDay {day+1}: {current_date.strftime('%Y-%m-%d')}")
     
     # 1日24時間の予測
     for hour in range(24):
@@ -268,12 +273,12 @@ for day in range(16):
             'actuals_mean': np.mean(daily_actuals)
         })
         
-        print(f"  MAPE: {daily_mape:.2f}%, MAE: {daily_mae:.1f}万kW, R²: {daily_r2:.4f}")
+        print(f"  MAPE: {daily_mape:.2f}%, MAE: {daily_mae:.1f}万kW, R2: {daily_r2:.4f}")
     
     current_date += timedelta(days=1)
 
-logger.info("✅ 段階的予測完了")
-print(f"\n✅ 段階的予測完了")
+logger.info("段階的予測完了")
+print(f"\n段階的予測完了")
 
 # %%
 # ================================================================
@@ -296,29 +301,28 @@ overall_mape = mean_absolute_percentage_error(all_actuals, all_predictions) * 10
 overall_mae = mean_absolute_error(all_actuals, all_predictions)
 overall_r2 = r2_score(all_actuals, all_predictions)
 
-logger.info("📊 段階的予測 全期間結果計算完了")
+logger.info("段階的予測 全期間結果計算完了")
 logger.info(f"予測件数: {len(all_predictions)}件, MAPE: {overall_mape:.2f}%")
 
-print(f"\n📊 段階的予測 全期間結果")
+print(f"\n段階的予測 全期間結果")
 print(f"=" * 40)
 print(f"予測件数: {len(all_predictions)}件")
 print(f"MAPE: {overall_mape:.2f}%")
 print(f"MAE:  {overall_mae:.2f}万kW")
-print(f"R²:   {overall_r2:.4f}")
+print(f"R2:   {overall_r2:.4f}")
 
 # %%
 # ================================================================
 # 7. 【新機能】予測結果CSV保存機能
 # ================================================================
 
-def save_prediction_results_to_csv(predictions, daily_results, base_output_dir="data/predictions"):
+def save_prediction_results_to_csv(predictions, daily_results):
     """
-    予測結果をCSV形式で保存（Looker Studio用・戦略的ファイル名）
+    予測結果をCSV形式で保存
     
     Args:
         predictions (dict): 予測結果辞書 {datetime: predicted_value}
-        daily_results (list): 日別結果リスト
-        base_output_dir (str): ベース出力ディレクトリ
+        daily_results (list): 日別結果リスト（未使用）
     
     Returns:
         dict: 保存結果情報
@@ -328,16 +332,9 @@ def save_prediction_results_to_csv(predictions, daily_results, base_output_dir="
     timestamp = now.strftime('%Y%m%d_%H%M%S')
     run_date = now.strftime('%Y-%m-%d')
     
-    # ディレクトリ構造作成
-    base_path = Path(base_output_dir)
-    detailed_dir = base_path / "detailed"
-    summary_dir = base_path / "daily_summary"
-    metadata_dir = base_path / "metadata"
-    
     # ディレクトリ作成
-    detailed_dir.mkdir(parents=True, exist_ok=True)
-    summary_dir.mkdir(parents=True, exist_ok=True)
-    metadata_dir.mkdir(parents=True, exist_ok=True)
+    base_path = Path(energy_env_path) / 'data' / 'predictions'
+    base_path.mkdir(parents=True, exist_ok=True)
     
     # 予測結果をDataFrameに変換
     prediction_data = []
@@ -354,9 +351,6 @@ def save_prediction_results_to_csv(predictions, daily_results, base_output_dir="
             error_rate = error_abs / actual_value * 100
         
         prediction_data.append({
-            'prediction_run_timestamp': timestamp,
-            'prediction_run_date': run_date,
-            'target_datetime': target_datetime.strftime('%Y-%m-%d %H:%M:%S'),
             'target_date': target_datetime.strftime('%Y-%m-%d'),
             'target_hour': target_datetime.hour,
             'target_weekday': target_datetime.weekday(),  # 0=月曜
@@ -364,68 +358,21 @@ def save_prediction_results_to_csv(predictions, daily_results, base_output_dir="
             'predicted_power': round(predicted_value, 2),
             'actual_power': round(actual_value, 2) if actual_value is not None else None,
             'error_absolute': round(error_abs, 2) if error_abs is not None else None,
-            'error_percentage': round(error_rate, 2) if error_rate is not None else None,
-            'prediction_type': '16day_iterative',
-            'model_version': 'phase9_xgboost_v1',
-            'created_at': now.strftime('%Y-%m-%d %H:%M:%S')
+            'error_percentage': round(error_rate, 2) if error_rate is not None else None
         })
     
-    # 1. 時間別詳細データ保存
+    # 予測結果CSV保存
     predictions_df = pd.DataFrame(prediction_data)
-    detailed_filename = f"predictions_detailed_{timestamp}.csv"
-    detailed_filepath = detailed_dir / detailed_filename
-    predictions_df.to_csv(detailed_filepath, index=False, encoding='utf-8')
-    
-    # 2. 日別サマリー保存
-    summary_filepath = None
-    if daily_results:
-        daily_df = pd.DataFrame(daily_results)
-        daily_df['prediction_run_timestamp'] = timestamp
-        daily_df['prediction_run_date'] = run_date
-        daily_df['created_at'] = now.strftime('%Y-%m-%d %H:%M:%S')
-        
-        summary_filename = f"predictions_summary_{timestamp}.csv"
-        summary_filepath = summary_dir / summary_filename
-        daily_df.to_csv(summary_filepath, index=False, encoding='utf-8')
-    
-    # 3. メタデータ保存
-    metadata = {
-        'execution_info': {
-            'timestamp': timestamp,
-            'run_date': run_date,
-            'prediction_count': len(predictions),
-            'date_range_start': min(predictions.keys()).strftime('%Y-%m-%d'),
-            'date_range_end': max(predictions.keys()).strftime('%Y-%m-%d'),
-            'overall_mape': round(overall_mape, 2)
-        },
-        'file_paths': {
-            'detailed_csv': str(detailed_filepath),
-            'summary_csv': str(summary_filepath) if summary_filepath else None
-        },
-        'model_info': {
-            'model_version': 'phase9_xgboost_v1',
-            'prediction_type': '16day_iterative',
-            'features_used': len(features)
-        }
-    }
-    
-    metadata_filename = f"metadata_{timestamp}.json"
-    metadata_filepath = metadata_dir / metadata_filename
-    
-    import json
-    with open(metadata_filepath, 'w', encoding='utf-8') as f:
-        json.dump(metadata, f, indent=2, ensure_ascii=False)
+    csv_filename = f"predictions_{timestamp}.csv"
+    csv_filepath = base_path / csv_filename
+    predictions_df.to_csv(csv_filepath, index=False, encoding='utf-8')
     
     # 保存結果返却
     result = {
         'success': True,
         'timestamp': timestamp,
         'run_date': run_date,
-        'files': {
-            'detailed_csv': str(detailed_filepath),
-            'summary_csv': str(summary_filepath) if summary_filepath else None,
-            'metadata_json': str(metadata_filepath)
-        },
+        'csv_file': str(csv_filepath),
         'prediction_count': len(predictions),
         'date_range': f"{min(predictions.keys()).date()} to {max(predictions.keys()).date()}",
         'overall_mape': round(overall_mape, 2)
@@ -434,40 +381,35 @@ def save_prediction_results_to_csv(predictions, daily_results, base_output_dir="
     return result
 
 # 予測結果保存実行
-logger.info("💾 予測結果CSV保存開始（戦略的ファイル名・構造化）")
-print(f"\n💾 予測結果CSV保存開始（戦略的ファイル名・構造化）")
+logger.info("予測結果CSV保存開始")
+print(f"\n予測結果CSV保存開始")
 print("=" * 50)
 
 save_result = save_prediction_results_to_csv(predictions, daily_results)
 
 if save_result['success']:
-    logger.info("✅ 予測結果保存完了")
+    logger.info("予測結果保存完了")
     logger.info(f"実行タイムスタンプ: {save_result['timestamp']}")
     logger.info(f"予測件数: {save_result['prediction_count']}件, 精度: MAPE {save_result['overall_mape']}%")
-    logger.info(f"詳細データ: {save_result['files']['detailed_csv']}")
+    logger.info(f"保存ファイル: {save_result['csv_file']}")
     
-    print(f"✅ 予測結果保存完了")
-    print(f"⏰ 実行タイムスタンプ: {save_result['timestamp']}")
-    print(f"")
-    print(f"📁 保存ファイル:")
-    print(f"  📊 詳細データ: {save_result['files']['detailed_csv']}")
-    print(f"  📈 日別サマリー: {save_result['files']['summary_csv']}")
-    print(f"  📋 メタデータ: {save_result['files']['metadata_json']}")
-    print(f"")
-    print(f"📊 データ概要:")
+    print(f"予測結果保存完了")
+    print(f"実行タイムスタンプ: {save_result['timestamp']}")
+    print(f"保存ファイル: {save_result['csv_file']}")
+    print(f"データ概要:")
     print(f"  予測件数: {save_result['prediction_count']}件")
     print(f"  対象期間: {save_result['date_range']}")
     print(f"  精度: MAPE {save_result['overall_mape']}%")
 else:
-    logger.error("❌ 予測結果保存失敗")
-    print(f"❌ 保存失敗")
+    logger.error("予測結果保存失敗")
+    print(f"保存失敗")
 
 # %%
 # ================================================================
 # 8. 外れ値検出・分析（IQR法）
 # ================================================================
 
-print(f"\n📊 外れ値検出・分析")
+print(f"\n外れ値検出・分析")
 print(f"=" * 40)
 
 # 残差計算
@@ -496,51 +438,49 @@ print(f"  外れ値: {outliers_count}件 ({outliers_count/len(abs_residuals)*100
 # 9. 実験総括・Phase 11準備完了確認
 # ================================================================
 
-print(f"\n🎉 段階的予測実験・Phase 11準備完了")
+print(f"\n段階的予測実験・Phase 11準備完了")
 print("="*60)
 
 print(f"【実験成果】")
-print(f"✅ 段階的予測精度: MAPE {overall_mape:.2f}%")
-print(f"✅ 前回固定予測からの劣化: +{overall_mape - 2.54:.2f}%")
-print(f"✅ 外れ値: {outliers_count}件 ({outliers_count/len(abs_residuals)*100:.1f}%)")
-print(f"✅ 土日祝日対応: dropna()なしでも安定運用")
+print(f"段階的予測精度: MAPE {overall_mape:.2f}%")
+print(f"前回固定予測からの劣化: +{overall_mape - 2.54:.2f}%")
+print(f"外れ値: {outliers_count}件 ({outliers_count/len(abs_residuals)*100:.1f}%)")
+print(f"土日祝日対応: dropna()なしでも安定運用")
 
 print(f"\n【Phase 11ダッシュボード準備完了】")
-print(f"📊 詳細データCSV: {save_result['files']['detailed_csv']}")
-print(f"📈 日別サマリーCSV: {save_result['files']['summary_csv']}")
-print(f"📋 メタデータJSON: {save_result['files']['metadata_json']}")
-print(f"🔗 次ステップ: GCSUploader → BigQuery → Looker Studio")
+print(f"予測結果CSV: {save_result['csv_file']}")
+print(f"次ステップ: GCSUploader → BigQuery → Looker Studio")
 
 print(f"\n【Phase 10完了判断】")
 if overall_mape <= 3.5:
-    print(f"✅ MAPE {overall_mape:.2f}% - 実用レベル達成")
-    print(f"✅ Phase 10日次自動予測システム構築OK")
-    print(f"✅ Phase 11 Looker Studioダッシュボード移行OK")
+    print(f"MAPE {overall_mape:.2f}% - 実用レベル達成")
+    print(f"Phase 10日次自動予測システム構築OK")
+    print(f"Phase 11 Looker Studioダッシュボード移行OK")
 else:
-    print(f"⚠️ MAPE {overall_mape:.2f}% - 精度向上策要検討")
-    print(f"⚠️ Phase 10システム化前に追加改良推奨")
+    print(f"MAPE {overall_mape:.2f}% - 精度向上策要検討")
+    print(f"Phase 10システム化前に追加改良推奨")
 
-logger.info("🎉 Phase 10段階的予測実験・保存機能付きバージョン完了！")
-logger.info("✨ Phase 11 Looker Studioダッシュボード構築準備完了！")
+logger.info("Phase 10段階的予測実験・保存機能付きバージョン完了")
+logger.info("Phase 11 Looker Studioダッシュボード構築準備完了")
 
-print(f"\n🎉 Phase 10段階的予測実験・保存機能付きバージョン完了！")
-print(f"✨ Phase 11 Looker Studioダッシュボード構築準備完了！")
+print(f"\nPhase 10段階的予測実験・保存機能付きバージョン完了")
+print(f"Phase 11 Looker Studioダッシュボード構築準備完了")
 
 # %%
 # ================================================================
 # 10. 保存したCSVファイルの確認
 # ================================================================
 
-print(f"\n📋 保存されたCSVファイル確認")
+print(f"\n保存されたCSVファイル確認")
 print("=" * 50)
 
-# predictions CSVの内容確認
-if save_result['files']['detailed_csv'] and os.path.exists(save_result['files']['detailed_csv']):
-    saved_df = pd.read_csv(save_result['files']['detailed_csv'])
-    print(f"✅ 詳細予測結果CSV読み込み完了")
-    print(f"📊 データ形状: {saved_df.shape}")
-    print(f"📅 期間: {saved_df['target_date'].min()} ～ {saved_df['target_date'].max()}")
-    print(f"🕐 時間範囲: {saved_df['target_hour'].min()}時 ～ {saved_df['target_hour'].max()}時")
+# 保存されたCSVの内容確認
+if save_result['csv_file'] and os.path.exists(save_result['csv_file']):
+    saved_df = pd.read_csv(save_result['csv_file'])
+    print(f"予測結果CSV読み込み完了")
+    print(f"データ形状: {saved_df.shape}")
+    print(f"期間: {saved_df['target_date'].min()} ～ {saved_df['target_date'].max()}")
+    print(f"時間範囲: {saved_df['target_hour'].min()}時 ～ {saved_df['target_hour'].max()}時")
     
     print(f"\n最初の3行:")
     print(saved_df.head(3).to_string(index=False))
@@ -549,14 +489,7 @@ if save_result['files']['detailed_csv'] and os.path.exists(save_result['files'][
     for i, col in enumerate(saved_df.columns):
         print(f"  {i+1:2d}. {col}")
 
-# daily summary CSVの内容確認  
-if save_result['files']['summary_csv'] and os.path.exists(save_result['files']['summary_csv']):
-    daily_saved_df = pd.read_csv(save_result['files']['summary_csv'])
-    print(f"\n✅ 日別サマリーCSV読み込み完了")
-    print(f"📊 データ形状: {daily_saved_df.shape}")
-    print(f"📈 MAPE範囲: {daily_saved_df['mape'].min():.2f}% ～ {daily_saved_df['mape'].max():.2f}%")
-
-print(f"\n🔗 次のステップ:")
+print(f"\n次のステップ:")
 print(f"1. GCSUploaderでCSVファイルをGCSにアップロード")
 print(f"2. BigQueryにEXTERNAL TABLE作成またはデータ投入")
 print(f"3. Looker StudioでBigQueryデータソース接続")

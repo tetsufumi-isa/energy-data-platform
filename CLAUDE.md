@@ -17,6 +17,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 実行コマンド
 
+### 前提条件: 仮想環境の有効化
+```bash
+# Windows
+source venv/Scripts/activate
+
+# または
+venv\Scripts\activate
+```
+
 ### Phase 11で使用するコマンド
 ```bash
 # 予測実行+CSV出力（Phase 11メイン）
@@ -35,6 +44,8 @@ python -m src.utils.check_ml_features_missing
 ## 質問別参照ガイド
 
 **まず確認**: `learning_memos/INDEX.md` - 全ファイル構成とClaude推奨参照順
+
+**最新セッション**: `learning_memos/20250901_1532_学習まとめ・進捗報告.md` - 今回の成果・Phase 11準備完了
 
 | 質問タイプ | 参照先 |
 |-----------|--------|
@@ -62,3 +73,7 @@ Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
 ALWAYS prefer editing an existing file to creating a new one.
 NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+
+## コーディング方針
+- コード内に絵文字使わない
+- コード内で絵文字見つけたら修正する
