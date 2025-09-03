@@ -45,7 +45,7 @@ python -m src.utils.check_ml_features_missing
 
 **まず確認**: `learning_memos/INDEX.md` - 全ファイル構成とClaude推奨参照順
 
-**最新セッション**: `learning_memos/20250903_1014_学習まとめ・進捗報告.md` - 自動化戦略設計・Phase 11プロジェクトモード準備完了
+**最新セッション**: `learning_memos/20250903_1645_学習まとめ・進捗報告.md` - GCS→BigQuery→Looker Studio パイプライン完成・ダッシュボード設計完了
 
 | 質問タイプ | 参照先 |
 |-----------|--------|
@@ -77,3 +77,7 @@ NEVER proactively create documentation files (*.md) or README files. Only create
 ## コーディング方針
 - コード内に絵文字使わない
 - コード内で絵文字見つけたら修正する
+
+## コミュニケーション方針
+- **必ず日本語で対応する** - プロジェクト概要・技術説明・進捗報告など全て日本語
+- 英語での説明・表記は行わない（コード内コメント・変数名は除く）
