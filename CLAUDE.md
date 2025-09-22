@@ -45,7 +45,7 @@ python -m src.utils.check_ml_features_missing
 
 **まず確認**: `learning_memos/INDEX.md` - 全ファイル構成とClaude推奨参照順
 
-**最新セッション**: `learning_memos/20250918_Phase11_時間別分析ダッシュボード実装完了.md` - 時間別分析ダッシュボード完成・技術制約解決
+**最新セッション**: `learning_memos/20250922_Phase11_散布図・相関分析機能実装完了.md` - 散布図・相関分析機能実装完成・技術制約解決
 
 | 質問タイプ | 参照先 |
 |-----------|--------|
