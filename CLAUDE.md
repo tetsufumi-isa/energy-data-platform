@@ -45,7 +45,7 @@ python -m src.utils.check_ml_features_missing
 
 **まず確認**: `learning_memos/INDEX.md` - 全ファイル構成とClaude推奨参照順
 
-**最新セッション**: `learning_memos/20250925_Phase11_予測精度分析ダッシュボード設計完了.md` - 予測精度分析ダッシュボード設計・16日サイクル運用設計
+**最新セッション**: `learning_memos/20250926_Phase11_BQステータステーブルSQL実装・本番環境対応完了.md` - BQステータステーブルSQL実装・本番環境対応完了
 
 | 質問タイプ | 参照先 |
 |-----------|--------|
