@@ -12,14 +12,11 @@ import os
 import zipfile
 import requests
 import argparse
+import uuid
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from logging import getLogger
-
-from src.utils.logging_config import setup_logging
-
-# モジュール専用のロガーを取得
-logger = getLogger('energy_env.data_processing.data_downloader')
+from google.cloud import bigquery
 
 class PowerDataDownloader:
     """東京電力でんき予報データダウンローダー"""
@@ -29,7 +26,7 @@ class PowerDataDownloader:
     def __init__(self, base_dir=None):
         """
         初期化
-        
+
         Args:
             base_dir (str): データ保存先のベースディレクトリ
                           Noneの場合は環境変数ENERGY_ENV_PATHから取得
@@ -39,10 +36,42 @@ class PowerDataDownloader:
             if energy_env_path is None:
                 raise ValueError("ENERGY_ENV_PATH environment variable is not set")
             base_dir = os.path.join(energy_env_path, 'data', 'raw')
-        
+            self.log_dir = Path(energy_env_path) / 'logs' / 'tepco_api'
+        else:
+            self.log_dir = Path(base_dir).parent.parent / 'logs' / 'tepco_api'
+
         self.base_dir = Path(base_dir)
-        logger.info(f"PowerDataDownloader initialized with base_dir: {self.base_dir}")
-    
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # BigQuery設定
+        self.bq_client = bigquery.Client()
+        self.bq_table_id = "energy-env.prod_energy_data.process_execution_log"
+
+        print(f"PowerDataDownloader initialized with base_dir: {self.base_dir}")
+
+    def _write_log(self, log_data):
+        """
+        ログをローカルファイルとBigQueryに記録
+
+        Args:
+            log_data (dict): ログデータ
+        """
+        # ローカルファイルに記録
+        log_date = log_data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        log_file = self.log_dir / f"{log_date}_tepco_execution.jsonl"
+
+        try:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(log_data, ensure_ascii=False) + '\n')
+        except Exception as e:
+            print(f"Failed to write log file: {e}")
+
+        # BigQueryに記録
+        try:
+            self.bq_client.insert_rows_json(self.bq_table_id, [log_data])
+        except Exception as e:
+            print(f"Failed to write to BigQuery (saved to file): {e}")
+
     def get_required_months(self, days=5):
         """
         指定日数分の日付から必要な月のセットを取得
@@ -56,8 +85,8 @@ class PowerDataDownloader:
         today = datetime.today()
         dates = [today - timedelta(days=i) for i in range(days + 1)]
         months = {date.strftime('%Y%m') for date in dates}
-        
-        logger.info(f"Required months for {days} days: {sorted(months)}")
+
+        print(f"Required months for {days} days: {sorted(months)}")
         return months
     
     def get_months_from_date(self, date_str):
@@ -73,64 +102,149 @@ class PowerDataDownloader:
         try:
             date = datetime.strptime(date_str, '%Y%m%d')
         except ValueError as e:
-            logger.error(f"Invalid date format {date_str}: {e}")
+            print(f"Invalid date format {date_str}: {e}")
             raise ValueError(f"日付はYYYYMMDD形式で入力してください: {date_str}")
-        
+
         # 未来日付チェック
         if date.date() > datetime.today().date():
             today_str = datetime.today().strftime('%Y%m%d')
             raise ValueError(f"未来の日付は指定できません: {date_str} (今日: {today_str})")
-        
+
         month = date.strftime('%Y%m')
-        logger.info(f"Month for date {date_str}: {month}")
+        print(f"Month for date {date_str}: {month}")
         return {month}
     
-    def download_month_data(self, yyyymm):
+    def download_month_data(self, yyyymm, target_date=None):
         """
         指定月のデータをダウンロード・解凍
-        
+
         Args:
             yyyymm (str): 年月 (YYYYMM形式)
-            
+            target_date (str): 対象日付 (YYYY-MM-DD形式、ログ用)
+
         Returns:
             bool: ダウンロード成功時True
-            
+
         Raises:
             requests.exceptions.RequestException: ダウンロードエラー
         """
+        execution_id = str(uuid.uuid4())
+        started_at = datetime.now()
         url = f"{self.BASE_URL}/{yyyymm}_power_usage.zip"
         month_dir = self.base_dir / yyyymm
         zip_path = month_dir / f"{yyyymm}.zip"
-        
+
+        # 対象日付が指定されていない場合は今日を使用
+        if target_date is None:
+            target_date = datetime.now().strftime('%Y-%m-%d')
+
+        print(f"Downloading: {url}")
+
         try:
             # ディレクトリ作成
             month_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # ZIPダウンロード
-            logger.info(f"Downloading: {url}")
             response = requests.get(url, timeout=30)
             response.raise_for_status()
-            
+
             # ZIP保存
             with open(zip_path, 'wb') as f:
                 f.write(response.content)
-            
+
             # ZIP解凍
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(month_dir)
-            
-            logger.info(f"Successfully downloaded and extracted {yyyymm} data to {month_dir}")
+
+            # 成功ログ記録
+            completed_at = datetime.now()
+            file_size_mb = round(zip_path.stat().st_size / 1024 / 1024, 2)
+            duration_seconds = int((completed_at - started_at).total_seconds())
+
+            log_data = {
+                "execution_id": execution_id,
+                "date": target_date,
+                "process_type": "TEPCO_API",
+                "status": "SUCCESS",
+                "error_message": None,
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "records_processed": None,
+                "file_size_mb": file_size_mb,
+                "additional_info": {"month": yyyymm, "url": url}
+            }
+
+            self._write_log(log_data)
+            print(f"Successfully downloaded and extracted {yyyymm} data to {month_dir}")
             return True
-            
+
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
-                logger.warning(f"Data for {yyyymm} not yet available (404)")
+                # 404エラーは警告レベル（データ未公開）
+                completed_at = datetime.now()
+                duration_seconds = int((completed_at - started_at).total_seconds())
+
+                log_data = {
+                    "execution_id": execution_id,
+                    "date": target_date,
+                    "process_type": "TEPCO_API",
+                    "status": "FAILED",
+                    "error_message": f"Data for {yyyymm} not yet available (404)",
+                    "started_at": started_at.isoformat(),
+                    "completed_at": completed_at.isoformat(),
+                    "duration_seconds": duration_seconds,
+                    "records_processed": None,
+                    "file_size_mb": None,
+                    "additional_info": {"month": yyyymm, "url": url, "http_status": 404}
+                }
+
+                self._write_log(log_data)
+                print(f"Data for {yyyymm} not yet available (404)")
                 return False
             else:
-                logger.error(f"HTTP error downloading {yyyymm}: {e}")
+                # その他のHTTPエラー
+                completed_at = datetime.now()
+                duration_seconds = int((completed_at - started_at).total_seconds())
+
+                log_data = {
+                    "execution_id": execution_id,
+                    "date": target_date,
+                    "process_type": "TEPCO_API",
+                    "status": "FAILED",
+                    "error_message": f"HTTP error downloading {yyyymm}: {e}",
+                    "started_at": started_at.isoformat(),
+                    "completed_at": completed_at.isoformat(),
+                    "duration_seconds": duration_seconds,
+                    "records_processed": None,
+                    "file_size_mb": None,
+                    "additional_info": {"month": yyyymm, "url": url, "http_status": e.response.status_code}
+                }
+
+                self._write_log(log_data)
+                print(f"HTTP error downloading {yyyymm}: {e}")
                 raise
         except Exception as e:
-            logger.error(f"Error downloading {yyyymm}: {e}")
+            # その他のエラー
+            completed_at = datetime.now()
+            duration_seconds = int((completed_at - started_at).total_seconds())
+
+            log_data = {
+                "execution_id": execution_id,
+                "date": target_date,
+                "process_type": "TEPCO_API",
+                "status": "FAILED",
+                "error_message": f"Error downloading {yyyymm}: {e}",
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "records_processed": None,
+                "file_size_mb": None,
+                "additional_info": {"month": yyyymm, "url": url}
+            }
+
+            self._write_log(log_data)
+            print(f"Error downloading {yyyymm}: {e}")
             raise
     
     def download_for_days(self, days=5):
@@ -153,7 +267,7 @@ class PowerDataDownloader:
                 else:
                     results['failed'].append(month)
             except Exception as e:
-                logger.error(f"Failed to download {month}: {e}")
+                print(f"Failed to download {month}: {e}")
                 results['failed'].append(month)
         
         return results
@@ -188,7 +302,7 @@ class PowerDataDownloader:
             else:
                 results['failed'].append(yyyymm)
         except Exception as e:
-            logger.error(f"Failed to download {yyyymm}: {e}")
+            print(f"Failed to download {yyyymm}: {e}")
             results['failed'].append(yyyymm)
         
         return results
@@ -213,7 +327,7 @@ class PowerDataDownloader:
                 else:
                     results['failed'].append(month)
             except Exception as e:
-                logger.error(f"Failed to download {month}: {e}")
+                print(f"Failed to download {month}: {e}")
                 results['failed'].append(month)
         
         return results
@@ -233,8 +347,6 @@ def print_results(results):
 
 def main():
     """メイン関数"""
-    # ログ設定を初期化
-    setup_logging()
     
     # デフォルトのbase_dirを環境変数から取得
     energy_env_path = os.getenv('ENERGY_ENV_PATH')

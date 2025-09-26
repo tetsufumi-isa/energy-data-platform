@@ -45,7 +45,7 @@ python -m src.utils.check_ml_features_missing
 
 **まず確認**: `learning_memos/INDEX.md` - 全ファイル構成とClaude推奨参照順
 
-**最新セッション**: `learning_memos/20250926_Phase11_BQステータステーブルSQL実装・本番環境対応完了.md` - BQステータステーブルSQL実装・本番環境対応完了
+**最新セッション**: `learning_memos/20250926_Phase11_東電APIログ実装完了・コードレビュー待ち.md` - 東電APIログ実装完了・コードレビュー待ち
 
 | 質問タイプ | 参照先 |
 |-----------|--------|
