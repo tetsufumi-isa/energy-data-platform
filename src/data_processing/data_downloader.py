@@ -34,7 +34,7 @@ class PowerDataDownloader:
         if base_dir is None:
             energy_env_path = os.getenv('ENERGY_ENV_PATH')
             if energy_env_path is None:
-                raise ValueError("ENERGY_ENV_PATH environment variable is not set")
+                raise ValueError("ENERGY_ENV_PATH環境変数が設定されていません")
             base_dir = os.path.join(energy_env_path, 'data', 'raw')
             self.log_dir = Path(energy_env_path) / 'logs' / 'tepco_api'
         else:
@@ -47,7 +47,7 @@ class PowerDataDownloader:
         self.bq_client = bigquery.Client()
         self.bq_table_id = "energy-env.prod_energy_data.process_execution_log"
 
-        print(f"PowerDataDownloader initialized with base_dir: {self.base_dir}")
+        print(f"PowerDataDownloader 初期化完了 保存先: {self.base_dir}")
 
     def _write_log(self, log_data):
         """
@@ -64,40 +64,40 @@ class PowerDataDownloader:
             with open(log_file, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(log_data, ensure_ascii=False) + '\n')
         except Exception as e:
-            print(f"Failed to write log file: {e}")
+            print(f"ログファイル書き込み失敗: {e}")
 
         # BigQueryに記録
         try:
             self.bq_client.insert_rows_json(self.bq_table_id, [log_data])
         except Exception as e:
-            print(f"Failed to write to BigQuery (saved to file): {e}")
+            print(f"BigQuery書き込み失敗（ファイルには保存済み）: {e}")
 
     def get_required_months(self, days=5):
         """
         指定日数分の日付から必要な月のセットを取得
-        
+
         Args:
-            days (int): 今日から遡る日数（デフォルト: 5）
-            
+            days (int): 昨日から遡る日数（デフォルト: 5）
+
         Returns:
             set: 必要な月の文字列セット (例: {'202504', '202505'})
         """
-        today = datetime.today()
-        dates = [today - timedelta(days=i) for i in range(days + 1)]
+        yesterday = datetime.today() - timedelta(days=1)
+        dates = [yesterday - timedelta(days=i) for i in range(days + 1)]
         months = {date.strftime('%Y%m') for date in dates}
 
-        print(f"Required months for {days} days: {sorted(months)}")
+        print(f"過去{days}日分に必要な月: {sorted(months)}")
         return months
     
-    def get_months_from_date(self, date_str):
+    def get_month_from_date(self, date_str):
         """
         特定日から必要な月を取得
-        
+
         Args:
             date_str (str): 日付文字列 (YYYYMMDD形式)
-            
+
         Returns:
-            set: 月の文字列セット
+            str: 月の文字列 (YYYYMM形式)
         """
         try:
             date = datetime.strptime(date_str, '%Y%m%d')
@@ -105,14 +105,15 @@ class PowerDataDownloader:
             print(f"Invalid date format {date_str}: {e}")
             raise ValueError(f"日付はYYYYMMDD形式で入力してください: {date_str}")
 
-        # 未来日付チェック
-        if date.date() > datetime.today().date():
-            today_str = datetime.today().strftime('%Y%m%d')
-            raise ValueError(f"未来の日付は指定できません: {date_str} (今日: {today_str})")
+        # 未来日付・当日チェック（電力データは翌日確定のため）
+        yesterday = datetime.today() - timedelta(days=1)
+        if date.date() > yesterday.date():
+            yesterday_str = yesterday.strftime('%Y%m%d')
+            raise ValueError(f"計測が完了した昨日までの日付しか指定できません: {date_str} (利用可能: {yesterday_str}まで)")
 
         month = date.strftime('%Y%m')
-        print(f"Month for date {date_str}: {month}")
-        return {month}
+        print(f"日付 {date_str} に対応する月: {month}")
+        return month
     
     def download_month_data(self, yyyymm, target_date=None):
         """
@@ -132,17 +133,19 @@ class PowerDataDownloader:
         started_at = datetime.now()
         url = f"{self.BASE_URL}/{yyyymm}_power_usage.zip"
         month_dir = self.base_dir / yyyymm
-        zip_path = month_dir / f"{yyyymm}.zip"
+        zip_path = month_dir / "zip" / f"{yyyymm}.zip"
 
-        # 対象日付が指定されていない場合は今日を使用
+        # 対象日付が指定されていない場合は昨日を使用（電力使用量データは翌日確定のため）
         if target_date is None:
-            target_date = datetime.now().strftime('%Y-%m-%d')
+            yesterday = datetime.now() - timedelta(days=1)
+            target_date = yesterday.strftime('%Y-%m-%d')
 
         print(f"Downloading: {url}")
 
         try:
             # ディレクトリ作成
             month_dir.mkdir(parents=True, exist_ok=True)
+            zip_path.parent.mkdir(parents=True, exist_ok=True)
 
             # ZIPダウンロード
             response = requests.get(url, timeout=30)
@@ -176,7 +179,7 @@ class PowerDataDownloader:
             }
 
             self._write_log(log_data)
-            print(f"Successfully downloaded and extracted {yyyymm} data to {month_dir}")
+            print(f"{yyyymm} データのダウンロード・解凍が完了しました: {month_dir}")
             return True
 
         except requests.exceptions.HTTPError as e:
@@ -317,32 +320,19 @@ class PowerDataDownloader:
         Returns:
             dict: ダウンロード結果
         """
-        months = self.get_months_from_date(date_str)
+        month = self.get_month_from_date(date_str)
         results = {'success': [], 'failed': []}
-        
-        for month in months:
-            try:
-                if self.download_month_data(month):
-                    results['success'].append(month)
-                else:
-                    results['failed'].append(month)
-            except Exception as e:
-                print(f"Failed to download {month}: {e}")
+
+        try:
+            if self.download_month_data(month):
+                results['success'].append(month)
+            else:
                 results['failed'].append(month)
+        except Exception as e:
+            print(f"{month} のダウンロードに失敗しました: {e}")
+            results['failed'].append(month)
         
         return results
-
-
-def print_results(results):
-    """ダウンロード結果を表示"""
-    if results['success']:
-        print(f"✅ 成功: {', '.join(results['success'])}")
-    
-    if results['failed']:
-        print(f"❌ 失敗: {', '.join(results['failed'])}")
-    
-    if not results['success'] and not results['failed']:
-        print("📝 処理対象がありませんでした")
 
 
 def main():
@@ -398,12 +388,24 @@ def main():
     elif args.date:
         print(f"📅 特定日モード: {args.date}")
         results = downloader.download_for_date(args.date)
-    else:
+    elif args.days:
         print(f"📅 日数指定モード: 過去{args.days}日分")
         results = downloader.download_for_days(args.days)
+    else:
+        print("❌ エラー: 実行モードが特定できません")
+        print("   --days, --month, --date のいずれかを指定してください")
+        return
     
     # 結果表示
-    print_results(results)
+    if results['success']:
+        print(f"✅ 成功: {', '.join(results['success'])}")
+
+    if results['failed']:
+        print(f"❌ 失敗: {', '.join(results['failed'])}")
+
+    if not results['success'] and not results['failed']:
+        print("📝 処理対象がありませんでした")
+
     print("🏁 ダウンロード完了")
 
 

@@ -56,8 +56,8 @@ def test_date_processing():
     
     # 正常系: 月抽出ロジックのテスト
     try:
-        result = downloader.get_months_from_date("20250501")
-        expected = {"202505"}
+        result = downloader.get_month_from_date("20250501")
+        expected = "202505"
         if result == expected:
             print_result(True, f"月抽出成功: {result}")
         else:
@@ -67,7 +67,7 @@ def test_date_processing():
     
     # 異常系: エラーハンドリングのテスト（標準モジュールのエラーを受け取れるか）
     try:
-        downloader.get_months_from_date("invalid_date")
+        downloader.get_month_from_date("invalid_date")
         print_result(False, "無効日付がエラーにならない")
     except ValueError:
         print_result(True, "無効日付を正しく検出")
@@ -144,10 +144,10 @@ def test_future_date_handling():
     
     # 未来日付の処理テスト（新機能：未来日付は拒否される）
     try:
-        months = downloader.get_months_from_date(future_date_str)
-        print_result(False, f"未来日付が拒否されなかった: {months}")
+        month = downloader.get_month_from_date(future_date_str)
+        print_result(False, f"未来日付が拒否されなかった: {month}")
     except ValueError as e:
-        if "未来の日付は指定できません" in str(e):
+        if "計測が完了した昨日までの日付しか指定できません" in str(e):
             print_result(True, f"未来日付を正しく拒否: {e}")
         else:
             print_result(False, f"予期しないエラー: {e}")
