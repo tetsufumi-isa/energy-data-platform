@@ -45,7 +45,7 @@ python -m src.utils.check_ml_features_missing
 
 **まず確認**: `learning_memos/INDEX.md` - 全ファイル構成とClaude推奨参照順
 
-**最新セッション**: `learning_memos/20250930_Phase11_段階的予測ロジック解明・BQ更新方針策定完了.md` - 段階的予測ロジック解明・祝日データ問題特定・BQ更新方針策定完了
+**最新セッション**: `learning_memos/20250930_Phase11_データソーステーブルリファクタリング・日付マッピング方式実装.md` - データソース追跡完了・date_lag_mapping方式実装・本番環境テーブル構築完了
 
 | 質問タイプ | 参照先 |
 |-----------|--------|
@@ -79,7 +79,7 @@ python -m src.utils.check_ml_features_missing
 8. 16日に一度の実行設定
 9. Lookerstudioの予測精度の部分の修正
 
-**完了状況**: 段階的予測ロジック解明・BQ更新方針策定完了・ステータステーブル実装準備
+**完了状況**: データソース追跡完了・date_lag_mapping方式実装完了・本番環境テーブル構築完了・ml_features作成SQL準備完了
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
