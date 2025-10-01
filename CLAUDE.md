@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト現在地
 
-**Phase**: 11実装中（基盤修正フェーズ第1段階完了・ステータステーブル実装準備）  
+**Phase**: 11実装中（予測コードBQ対応完了・ログシステムリファクタリング完了）  
 **予測精度**: MAPE 3.43%（段階的予測・実用レベル達成）  
 **技術スタック**: Python 3.12 + XGBoost + GCP + Looker Studio  
 **環境変数**: `ENERGY_ENV_PATH=C:\Users\tetsu\dev\energy-env`
@@ -45,7 +45,7 @@ python -m src.utils.check_ml_features_missing
 
 **まず確認**: `learning_memos/INDEX.md` - 全ファイル構成とClaude推奨参照順
 
-**最新セッション**: `learning_memos/20250930_Phase11_データソーステーブルリファクタリング・日付マッピング方式実装.md` - データソース追跡完了・date_lag_mapping方式実装・本番環境テーブル構築完了
+**最新セッション**: `learning_memos/20251001_Phase11_予測コードBQ対応・ログシステムリファクタリング完了.md` - 予測コードBQ対応完了・統合ログシステム実装・コードレビュー進行中
 
 | 質問タイプ | 参照先 |
 |-----------|--------|
@@ -79,7 +79,7 @@ python -m src.utils.check_ml_features_missing
 8. 16日に一度の実行設定
 9. Lookerstudioの予測精度の部分の修正
 
-**完了状況**: データソース追跡完了・date_lag_mapping方式実装完了・本番環境テーブル構築完了・ml_features作成SQL準備完了
+**完了状況**: 予測コードBQ対応完了・統合ログシステム実装完了・ML_PREDICTIONステータスログ保存実装完了
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
