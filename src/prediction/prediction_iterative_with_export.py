@@ -174,21 +174,22 @@ print(f"実行ID: {execution_id}")
 
 # %%
 # ================================================================
-# 1. BigQueryクライアント初期化・データ読み込み
+# 1. メイン処理（エラーハンドリング付き）
 # ================================================================
 
-# 環境変数からベースパスを取得
-energy_env_path = os.getenv('ENERGY_ENV_PATH', '.')
+try:
+    # 環境変数からベースパスを取得
+    energy_env_path = os.getenv('ENERGY_ENV_PATH', '.')
 
-# BigQueryクライアント初期化
-logger.info("BigQueryクライアント初期化")
-client = bigquery.Client(project='energy-env')
-print("BigQueryクライアント初期化完了")
+    # BigQueryクライアント初期化
+    logger.info("BigQueryクライアント初期化")
+    client = bigquery.Client(project='energy-env')
+    print("BigQueryクライアント初期化完了")
 
-# ml_featuresテーブルから学習データ取得（実行日の前日まで）
-logger.info("ml_featuresテーブルから学習データ取得開始")
-yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-logger.info(f"学習データ期間: ～{yesterday}")
+    # ml_featuresテーブルから学習データ取得（実行日の前日まで）
+    logger.info("ml_featuresテーブルから学習データ取得開始")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    logger.info(f"学習データ期間: ～{yesterday}")
 query_ml_features = f"""
 SELECT
     date,
@@ -357,9 +358,9 @@ business_days_future = calendar_data[
     (~calendar_data['is_holiday']) & (~calendar_data['is_weekend'])
 ].index  # 日付のみ（Index化）
 
-def prepare_features_no_fallback(target_datetime, predictions):
+def prepare_features(target_datetime, predictions):
     """
-    予測対象時刻の特徴量を準備（BQ対応版・フォールバック完全削除版）
+    予測対象時刻の特徴量を準備（BQ対応版）
 
     Args:
         target_datetime: 予測対象日時
@@ -460,8 +461,8 @@ for day in range(16):
     for hour in range(24):
         target_datetime = current_date + timedelta(hours=hour)
 
-        # 特徴量準備（フォールバック完全削除版）
-        feature_values = prepare_features_no_fallback(target_datetime, predictions)
+        # 特徴量準備
+        feature_values = prepare_features(target_datetime, predictions)
 
         # DataFrameに変換（XGBoostに入力）
         X_pred = pd.DataFrame([feature_values], columns=features)

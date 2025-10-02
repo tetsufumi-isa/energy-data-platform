@@ -123,9 +123,9 @@ print(f"✅ ベースラインモデル学習完了")
 # 4. 特徴量準備関数（フォールバック完全削除版）
 # ================================================================
 
-def prepare_features_no_fallback(target_datetime, predictions_dict):
+def prepare_features(target_datetime, predictions_dict):
     """
-    ml_features.csvの値を完全準拠で使用（フォールバック処理なし）
+    ml_features.csvの値を完全準拠で使用
     欠損値もnanのまま返してXGBoostに任せる
     """
     
@@ -238,8 +238,8 @@ for day in range(16):
     for hour in range(24):
         target_datetime = current_date + timedelta(hours=hour)
         
-        # 特徴量準備（フォールバック完全削除版）
-        feature_values = prepare_features_no_fallback(target_datetime, predictions)
+        # 特徴量準備
+        feature_values = prepare_features(target_datetime, predictions)
         
         # DataFrameに変換（XGBoostに入力）
         X_pred = pd.DataFrame([feature_values], columns=features)
@@ -336,8 +336,8 @@ empty_predictions = {}  # 初回なので空の辞書
 print(f"\n🔍 6/1 0:00の特徴量準備確認（フォールバック完全削除版）:")
 print("=" * 80)
 
-# 特徴量準備実行（フォールバック削除版）
-feature_values = prepare_features_no_fallback(target_datetime, empty_predictions)
+# 特徴量準備実行
+feature_values = prepare_features(target_datetime, empty_predictions)
 
 print(f"\n📋 準備された特徴量値:")
 for i, (feat_name, feat_val) in enumerate(zip(features, feature_values)):

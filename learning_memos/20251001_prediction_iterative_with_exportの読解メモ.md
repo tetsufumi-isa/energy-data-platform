@@ -52,7 +52,8 @@
     
 
     ・log_and_save_to_bq
-        ・受け取ったprocess_status(BQスキーマにあわせた辞書形式)から'process_type'と'status'を取得しメッセージを作成しlog_massageとしている
+        ・受け取ったprocess_status(BQスキーマにあわせた辞書形式)から'process_type'と'status'を取得し
+        　メッセージを作成しlog_massageとしている
         ・受け取ったログレベルがinfoである、またはログレベルを受け取っていなかったら、info()を実行
             ・logger.info(log_message, extra={'process_status': process_status})
                 ・log_messageをメッセージ、つまりログテキストとして、process_statusを追加したLogRecordを作成し
@@ -68,7 +69,7 @@
     ★BQクライアント、予測のステータスをBQにの内容に合わせた辞書、ログレベルを引数としてinfoとしてログを作成しBQへインサート
 
 
-◆予測開始
+◆予測
     ・実行ID作成、開始時間計測、ログ表示
     ・ベースのパスを環境変数から作成
     ・BQクライアント初期化
@@ -87,25 +88,61 @@
         ・business_days_train：過去20日の営業日だけのdatetimeと実績値
         ・business_days_future：16日先までの営業日だけのdatetimeのみ
     
-    ・prepare_features_no_fallback(target_datetime, predictions)
+    ・prepare_features(target_datetime, predictions)
         ・target_datetimeで受け取った対象のレコードだけをrowとする
+            ・future_features(気象データ、カレンダー、循環特徴量)から受け取る
         ・予測用の配列であるfeature_valuesを作成
-        ・定義した12特徴量のfeaturesを使って予測用の1feature_valuesにデータを追加していく
-            ・最初の予測
+        ・定義した12特徴量のfeaturesをfor文で回して予測用のfeature_valuesにデータを追加していく
+            ・16*24の予測のうちの1回目
+                ・引数のpredictionsは空の辞書
                 ・lag_1_dayには前日の実績値を追加
-                    ・予測用の配列であるfeature_valuesの最初の値
                 ・lag_7_dayには7日前の実績値を追加
-                    ・予測用の配列であるfeature_valuesの2つ目の値
                 ・lag_1_business_day
                     ・20のrangeを作って1からfor文
                         ・1日ずつ遡ってlag_dateとlag_datetimeを都度作成
                         ・business_days_trainの中にlag_datetimeがあればその実績値を追加
-                            ・予測用の配列であるfeature_valuesの3つ目の値
+            ・2回目以降の場合
+                ・引数のpredictionsに予測した日時をキーに予測値が入った辞書が入っている
+                ・lag_1_dayはpredictionsを使って予測値が入る
+                ・lag_7_dayは対象が過去なら実績値、未来ならpredictionsを使って予測値が入る
+                ・lag_1_business_day
+                    ・対象が未来なら未来ならpredictionsを使って予測値が入る
+                    ・過去なら1回目と同様の動作
+            ・その他の特徴量はrowから受け取ってfeature_valuesに追加
+                ・rowの中身はfuture_features(気象データ、カレンダー、循環特徴量)
+            ・過去と未来どちらにもヒットが無ければnan
+        ・feature_valuesを返す
+            ・12特徴量のfeaturesをfor文で回して作っているのでfeaturesのカラム順で作成されている
+    ★target_datetimeで受け取った日時に対する実績値または予測値を配置しfeature_valuesとして返す
+    　初回は実績値だけだが2回目以降は初回で予測した日時と予測がpredictionsに入ってくるのでそれも使う
+    　feature_valuesは定義した12特徴量のfeaturesをfor文で回して作っているので
+    　featuresのカラム順で作成されている
     
-
     ・予測結果を格納する変数を作成
         ・predictions：空の辞書
         ・daily_results：空の配列
+    
+    ・current_dateを宣言
+        ・current_dateは最初はstart_dateが配置され今日の00:00:00のdate_timeになる
+    ・16のrangeを作成してfor(16日分の予測)
+        ・current_date += timedelta(days=1)で当日+15日でまわす
+            ・24のrangeを作成してfor
+                ・target_datetime = current_date + timedelta(hours=hour)
+                    ・0時始まりで分と秒はゼロのまま0～23まで繰り返す
+                ・prepare_features(target_datetime, predictions)
+                    ・最初の実行はpredictionsは空で投げるがprepare_featuresで使わないので問題なし
+                        ・全て実績の特徴量データをfeature_valuesとして受け取る
+                    ・2回目以降は予測値をpredictionsに入れて投げる
+                ・モデルに食わせるdfとしてX_predを作成
+                    ・feature_valuesにカラムとしてfeaturesを使っているがfeature_valuesは
+                    　元々featuresをfor文で回して作成したので問題なし
+                ・X_predで予測実行し結果をpred_valueで受け取る
+                ・predictionsをtarget_datetimeをキーで、pred_valueを値として辞書更新
+                    ・予測対象となる日付時間に対する予測値の辞書ができあがる
+    ・16日分の予測が終わったら終了時間をprediction_end_timeとして保持
+    ・prediction_start_timeとprediction_end_timeを使って予測にかかった時間(秒)を
+    　duration_secondsとして保持
 
 
+◆プロセス実行ステータス記録
 
