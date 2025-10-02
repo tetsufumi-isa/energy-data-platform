@@ -491,43 +491,16 @@ duration_seconds = int((prediction_end_time - prediction_start_time).total_secon
 
 # %%
 # ================================================================
-# 6. プロセス実行ステータス記録
+# 6. 予測結果CSV保存
 # ================================================================
 
-logger.info("統合ログ保存開始（ファイル + BQ）")
-
-# プロセス実行ステータス作成（BigQueryのprocess_execution_logテーブルスキーマに準拠した辞書）
-process_status = {
-    'execution_id': execution_id,
-    'date': end_date.date(),
-    'process_type': 'ML_PREDICTION',
-    'status': 'SUCCESS',
-    'error_message': None,
-    'started_at': prediction_start_time,
-    'completed_at': prediction_end_time,
-    'duration_seconds': duration_seconds,
-    'records_processed': len(predictions),
-    'file_size_mb': None,
-    'additional_info': {
-        'prediction_period': f"{start_date.date()} to {end_date.date()}",
-        'prediction_count': len(predictions)
-    }
-}
-
-log_and_save_to_bq(client=client, process_status=process_status, log_level='INFO')
-print(f"統合ログ保存完了（ファイル + BQ）")
-
-# %%
-# ================================================================
-# 7. 【新機能】予測結果CSV保存機能
-# ================================================================
-
-def save_prediction_results_to_csv(predictions):
+def save_prediction_results_to_csv(predictions, execution_id):
     """
-    予測結果をCSV形式で保存（予測値のみ・検証なし）
+    予測結果をCSV形式で保存（BigQueryスキーマに準拠）
 
     Args:
         predictions (dict): 予測結果辞書 {datetime: predicted_value}
+        execution_id (str): 実行ID
 
     Returns:
         dict: 保存結果情報
@@ -541,16 +514,16 @@ def save_prediction_results_to_csv(predictions):
     base_path = Path(energy_env_path) / 'data' / 'predictions'
     base_path.mkdir(parents=True, exist_ok=True)
 
-    # 予測結果をDataFrameに変換
+    # 予測結果をDataFrameに変換（BigQueryスキーマに準拠）
     prediction_data = []
 
     for target_datetime, predicted_value in predictions.items():
         prediction_data.append({
-            'target_date': target_datetime.strftime('%Y-%m-%d'),
-            'target_hour': target_datetime.hour,
-            'target_weekday': target_datetime.weekday(),  # 0=月曜
-            'target_is_weekend': 1 if target_datetime.weekday() >= 5 else 0,
-            'predicted_power': round(predicted_value, 2)
+            'execution_id': execution_id,
+            'prediction_date': target_datetime.strftime('%Y-%m-%d'),
+            'prediction_hour': target_datetime.hour,
+            'predicted_power_kwh': round(predicted_value, 2),
+            'created_at': now.strftime('%Y-%m-%d %H:%M:%S')
         })
 
     # 予測結果CSV保存
@@ -576,7 +549,7 @@ logger.info("予測結果CSV保存開始")
 print(f"\n予測結果CSV保存開始")
 print("=" * 50)
 
-save_result = save_prediction_results_to_csv(predictions)
+save_result = save_prediction_results_to_csv(predictions, execution_id)
 
 if save_result['success']:
     logger.info("予測結果保存完了")
@@ -596,65 +569,89 @@ else:
 
 # %%
 # ================================================================
-# 8. 保存したCSVファイルの確認
+# 7. 予測結果BigQuery保存
 # ================================================================
 
-print(f"\n保存されたCSVファイル確認")
+logger.info("予測結果BigQuery保存開始")
+print(f"\n予測結果BigQuery保存開始")
 print("=" * 50)
 
-# 保存されたCSVの内容確認
-if save_result['csv_file'] and os.path.exists(save_result['csv_file']):
-    saved_df = pd.read_csv(save_result['csv_file'])
-    print(f"予測結果CSV読み込み完了")
-    print(f"データ形状: {saved_df.shape}")
-    print(f"期間: {saved_df['target_date'].min()} ～ {saved_df['target_date'].max()}")
-    print(f"時間範囲: {saved_df['target_hour'].min()}時 ～ {saved_df['target_hour'].max()}時")
+# BigQueryテーブル設定
+dataset_id = 'prod_energy_data'
+table_id = 'prediction_results'
+table_ref = f"{client.project}.{dataset_id}.{table_id}"
 
-    print(f"\n最初の3行:")
-    print(saved_df.head(3).to_string(index=False))
+# 予測結果をBigQuery用に変換
+bq_prediction_data = []
+for target_datetime, predicted_value in predictions.items():
+    bq_prediction_data.append({
+        'execution_id': execution_id,
+        'prediction_date': target_datetime.strftime('%Y-%m-%d'),
+        'prediction_hour': target_datetime.hour,
+        'predicted_power_kwh': round(predicted_value, 2),
+        'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    })
 
-    print(f"\n列情報:")
-    for i, col in enumerate(saved_df.columns):
-        print(f"  {i+1:2d}. {col}")
+bq_predictions_df = pd.DataFrame(bq_prediction_data)
+bq_insert_success = False
+bq_error_message = None
 
-logger.info("日次予測処理完了")
-print(f"\n日次予測処理完了")
-print(f"次ステップ: BigQueryへの予測結果保存 → Looker Studio表示")
+try:
+    # BigQueryへ挿入
+    job = client.load_table_from_dataframe(
+        bq_predictions_df,
+        table_ref,
+        job_config=bigquery.LoadJobConfig(
+            write_disposition="WRITE_APPEND"
+        )
+    )
+    job.result()  # Wait for the job to complete
+
+    bq_insert_success = True
+    logger.info(f"予測結果BigQuery保存完了: {len(bq_predictions_df)}件")
+    print(f"予測結果BigQuery保存完了: {len(bq_predictions_df)}件")
+
+except Exception as e:
+    bq_error_message = str(e)
+    logger.error(f"BigQuery保存エラー: {bq_error_message}")
+    print(f"BigQuery保存エラー: {bq_error_message}")
+    print(f"注意: 予測結果はCSVファイルに保存済みです")
 
 # %%
 # ================================================================
-# エラーハンドリング（注意事項）
+# 8. プロセス実行ステータス記録
 # ================================================================
-#
-# 現在のコードは段階的予測実験用のため、エラーハンドリングは最小限です。
-# 本番運用時は以下の対応が必要：
-#
-# 1. try-exceptブロックで全体を囲む
-# 2. エラー時にlog_and_save_to_bq()を呼び出し
-#    - status='FAILED'
-#    - error_message=str(e)
-#    - 部分的な処理時間を記録
-# 3. リトライロジックの実装（BQクエリ失敗時など）
-#
-# 例：
-# try:
-#     # 予測処理全体
-#     ...
-# except Exception as e:
-#     logger.error(f"予測処理エラー: {e}")
-#     # エラー時のプロセスステータス（BigQueryスキーマに準拠）
-#     error_process_status = {
-#         'execution_id': execution_id,
-#         'date': end_date.date(),
-#         'process_type': 'ML_PREDICTION',
-#         'status': 'FAILED',
-#         'error_message': str(e),
-#         'started_at': prediction_start_time,
-#         'completed_at': datetime.now(),
-#         'duration_seconds': None,
-#         'records_processed': None,
-#         'file_size_mb': None,
-#         'additional_info': None
-#     }
-#     log_and_save_to_bq(client=client, process_status=error_process_status, log_level='ERROR')
-#     raise
+
+logger.info("プロセス実行ステータス記録開始")
+
+# プロセス実行ステータス作成（BigQueryのprocess_execution_logテーブルスキーマに準拠）
+process_status = {
+    'execution_id': execution_id,
+    'date': end_date.date(),
+    'process_type': 'ML_PREDICTION',
+    'status': 'SUCCESS',
+    'error_message': None,
+    'started_at': prediction_start_time,
+    'completed_at': prediction_end_time,
+    'duration_seconds': duration_seconds,
+    'records_processed': len(predictions),
+    'file_size_mb': None,
+    'additional_info': {
+        'prediction_period': f"{start_date.date()} to {end_date.date()}",
+        'prediction_count': len(predictions),
+        'csv_saved': save_result['success'],
+        'bq_saved': bq_insert_success
+    }
+}
+
+# ローカルログ保存 + BigQueryインサート
+try:
+    log_and_save_to_bq(client=client, process_status=process_status, log_level='INFO')
+    logger.info("プロセス実行ステータス記録完了（ローカル + BQ）")
+    print(f"\nプロセス実行ステータス記録完了（ローカル + BQ）")
+except Exception as e:
+    logger.error(f"プロセス実行ステータス記録エラー: {e}")
+    print(f"プロセス実行ステータス記録エラー: {e}")
+
+logger.info("日次予測処理完了")
+print(f"\n日次予測処理完了")

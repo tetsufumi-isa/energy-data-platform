@@ -144,5 +144,22 @@
     　duration_secondsとして保持
 
 
+◆予測結果保存
+・save_prediction_results_to_csv(predictions):
+    ・predictionsは予測対象日時がキーで予測値が値の辞書
+        ・predictions.items()でキー, 値のタプルを返す
+    ・predictions.items()をforで回してcsvのもととなる辞書prediction_dataを作成
+    ・prediction_dataをcsvとして保存
+    ・csvの概要をresultという辞書にして返す
+★予測結果のpredictionsをcsvとして保存し概要をresultという辞書にして返す
+
+・save_prediction_results_to_csvを実行し結果をsave_resultとして受け取る
+・save_resultをみて成功/失敗のログを作成しローカル保存
+・predictionsをBQにもインサート
+
+
 ◆プロセス実行ステータス記録
+・log_and_save_to_bq実行
+    ・予測のステータスをBQにの内容に合わせた辞書、ログレベルを引数としてinfoとしてログを作成しBQへインサート
+    ・エラーの場合はエラー内容のログをローカル保存
 

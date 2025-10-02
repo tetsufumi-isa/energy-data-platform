@@ -4,9 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-**目的**: Google Cloudベースの電力使用量予測パイプラインの構築（データエンジニアポートフォリオ用）  
-**目標**: 年収700万円以上のフルリモートデータエンジニア／データアナリスト職への就職  
+**目的**: Google Cloudベースの電力使用量予測パイプラインの構築（データエンジニアポートフォリオ用）
+**目標**: 年収700万円以上のフルリモートデータエンジニア／データアナリスト職への就職
 **アプローチ**: 実務に近い開発環境とワークフローの実装、クラウドネイティブソリューションの実証
+
+## GCP環境設定
+
+**BigQueryロケーション**: `us-central1`
+**プロジェクトID**: （環境変数から取得）
+**データセット**: `energy_data`
 
 ## プロジェクト現在地
 
@@ -45,7 +51,7 @@ python -m src.utils.check_ml_features_missing
 
 **まず確認**: `learning_memos/INDEX.md` - 全ファイル構成とClaude推奨参照順
 
-**最新セッション**: `learning_memos/20251002_Phase11_BQエラーハンドリング実装完了.md` - ML_PREDICTION・TEPCO_APIのBigQueryエラーハンドリング実装完了（BQ接続エラーのローカルログ記録・適切な停止処理）
+**最新セッション**: `learning_memos/20251002_Phase11_予測結果BQ保存実装・TODO整理完了.md` - prediction_iterative_with_export.pyコードレビュー完全完了・予測結果BQ保存実装・Phase 11実装TODO整理
 
 | 質問タイプ | 参照先 |
 |-----------|--------|
@@ -79,9 +85,25 @@ Phase 11は「基盤整備→日次運用→予測精度分析」の3段階で�
 3. **予測精度分析実装**
    - 16日に1回の検証テーブル・精度ダッシュボード
 
-**完了状況**: 予測コードBQ対応・統合ログシステム実装・ML_PREDICTIONステータスログ保存・日次実行対応（検証分離・データ最適化）・BQエラーハンドリング実装（ML_PREDICTION・TEPCO_API）
+**完了状況**: 予測コードBQ対応・統合ログシステム実装・ML_PREDICTIONステータスログ保存・日次実行対応（検証分離・データ最適化）・BQエラーハンドリング実装（ML_PREDICTION・TEPCO_API）・予測結果BQ保存実装（prediction_resultsテーブル）・コードレビュー完全完了
 
 **進捗管理ルール**: セッション終了時に最新進捗mdファイルを作成し、このCLAUDE.mdの「最新セッション」と「完了状況」を更新する
+
+## セッション開始時の動作
+
+**重要**: チャット立ち上げ時は以下の手順で進捗を確認してください：
+
+1. **最新セッションファイルを読み込み**
+   - 上記の「最新セッション」に記載されているファイルパスを読み込む
+   - ファイル内のTODOセクションを確認
+
+2. **TodoWriteツールでTODOを記録**
+   - 最新セッションファイルから抽出したTODOをTodoWriteツールに登録
+   - 全てのTODOを`pending`ステータスで記録
+
+3. **ユーザーに進捗を報告**
+   - チャット開始時に「今回のTODOです」として一覧を表示
+   - 現在のフェーズと次に取り組むタスクを明示
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
