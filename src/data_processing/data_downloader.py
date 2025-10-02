@@ -70,7 +70,21 @@ class PowerDataDownloader:
         try:
             self.bq_client.insert_rows_json(self.bq_table_id, [log_data])
         except Exception as e:
-            print(f"BigQuery書き込み失敗（ファイルには保存済み）: {e}")
+            # BQエラーをローカルログにも記録
+            error_log = {
+                'timestamp': datetime.now().isoformat(),
+                'error_type': 'BQ_INSERT_FAILED',
+                'error_message': str(e),
+                'original_log_data': log_data
+            }
+            error_log_file = self.log_dir / f"{log_date}_bq_errors.jsonl"
+            try:
+                with open(error_log_file, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(error_log, ensure_ascii=False) + '\n')
+            except Exception as file_error:
+                print(f"エラーログファイル書き込み失敗: {file_error}")
+
+            print(f"BigQuery書き込み失敗（ファイルには保存済み・エラーログ記録済み）: {e}")
 
     def get_required_months(self, days=5):
         """

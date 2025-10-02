@@ -174,118 +174,127 @@ print(f"実行ID: {execution_id}")
 
 # %%
 # ================================================================
-# 1. メイン処理（エラーハンドリング付き）
+# 1. BigQueryクライアント初期化・データ読み込み
 # ================================================================
 
+# 環境変数からベースパスを取得
+energy_env_path = os.getenv('ENERGY_ENV_PATH', '.')
+
+# BigQueryクライアント初期化
+logger.info("BigQueryクライアント初期化")
+client = bigquery.Client(project='energy-env')
+print("BigQueryクライアント初期化完了")
+
 try:
-    # 環境変数からベースパスを取得
-    energy_env_path = os.getenv('ENERGY_ENV_PATH', '.')
-
-    # BigQueryクライアント初期化
-    logger.info("BigQueryクライアント初期化")
-    client = bigquery.Client(project='energy-env')
-    print("BigQueryクライアント初期化完了")
-
     # ml_featuresテーブルから学習データ取得（実行日の前日まで）
     logger.info("ml_featuresテーブルから学習データ取得開始")
     yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     logger.info(f"学習データ期間: ～{yesterday}")
-query_ml_features = f"""
-SELECT
-    date,
-    hour,
-    actual_power,
-    supply_capacity,
-    temperature_2m,
-    relative_humidity_2m,
-    precipitation,
-    weather_code,
-    day_of_week,
-    is_weekend,
-    is_holiday,
-    month,
-    hour_sin,
-    hour_cos,
-    lag_1_day,
-    lag_7_day,
-    lag_1_business_day
-FROM `energy-env.prod_energy_data.ml_features`
-WHERE date <= '{yesterday}'
-ORDER BY date, hour
-"""
-ml_features_train = client.query(query_ml_features).to_dataframe()
-logger.info(f"学習データ取得完了: {len(ml_features_train):,}件")
-print(f"学習データ取得完了: {len(ml_features_train):,}件")
+    query_ml_features = f"""
+    SELECT
+        date,
+        hour,
+        actual_power,
+        supply_capacity,
+        temperature_2m,
+        relative_humidity_2m,
+        precipitation,
+        weather_code,
+        day_of_week,
+        is_weekend,
+        is_holiday,
+        month,
+        hour_sin,
+        hour_cos,
+        lag_1_day,
+        lag_7_day,
+        lag_1_business_day
+    FROM `energy-env.prod_energy_data.ml_features`
+    WHERE date <= '{yesterday}'
+    ORDER BY date, hour
+    """
+    ml_features_train = client.query(query_ml_features).to_dataframe()
+    logger.info(f"学習データ取得完了: {len(ml_features_train):,}件")
+    print(f"学習データ取得完了: {len(ml_features_train):,}件")
 
-# datetime列作成
-ml_features_train['datetime'] = pd.to_datetime(
-    ml_features_train['date'].astype(str) + ' ' +
-    ml_features_train['hour'].astype(str).str.zfill(2) + ':00:00'
-)
-ml_features_train = ml_features_train.set_index('datetime')
+    # datetime列作成
+    ml_features_train['datetime'] = pd.to_datetime(
+        ml_features_train['date'].astype(str) + ' ' +
+        ml_features_train['hour'].astype(str).str.zfill(2) + ':00:00'
+    )
+    ml_features_train = ml_features_train.set_index('datetime')
 
-# 予測期間設定（今日から16日間）
-today = datetime.now().strftime('%Y-%m-%d')
-end_date_str = (datetime.now() + timedelta(days=15)).strftime('%Y-%m-%d')
-logger.info(f"予測期間: {today} ～ {end_date_str}")
+    # 予測期間設定（今日から16日間）
+    today = datetime.now().strftime('%Y-%m-%d')
+    end_date_str = (datetime.now() + timedelta(days=15)).strftime('%Y-%m-%d')
+    logger.info(f"予測期間: {today} ～ {end_date_str}")
 
-# calendar_dataテーブル取得（営業日判定用・予測期間のみ）
-logger.info("calendar_dataテーブル取得開始")
-query_calendar = f"""
-SELECT
-    date,
-    day_of_week,
-    is_weekend,
-    is_holiday
-FROM `energy-env.prod_energy_data.calendar_data`
-WHERE date BETWEEN '{today}' AND '{end_date_str}'
-ORDER BY date
-"""
-calendar_data = client.query(query_calendar).to_dataframe()
-calendar_data['date'] = pd.to_datetime(calendar_data['date']).dt.date
-calendar_data = calendar_data.set_index('date')
-logger.info(f"カレンダーデータ取得完了: {len(calendar_data):,}件")
-print(f"カレンダーデータ取得完了: {len(calendar_data):,}件")
-
-# 予測期間の気象・カレンダーデータ取得（未来データ生成用・今日から16日間）
-logger.info("予測期間の気象・カレンダーデータ取得開始")
-query_future_data = f"""
-SELECT
-    w.date,
-    w.hour,
-    w.temperature_2m,
-    w.relative_humidity_2m,
-    w.precipitation,
-    w.weather_code,
-    c.day_of_week,
-    c.is_weekend,
-    c.is_holiday,
-    EXTRACT(MONTH FROM w.date) as month
-FROM (
-    SELECT *
-    FROM `energy-env.prod_energy_data.weather_data`
+    # calendar_dataテーブル取得（営業日判定用・予測期間のみ）
+    logger.info("calendar_dataテーブル取得開始")
+    query_calendar = f"""
+    SELECT
+        date,
+        day_of_week,
+        is_weekend,
+        is_holiday
+    FROM `energy-env.prod_energy_data.calendar_data`
     WHERE date BETWEEN '{today}' AND '{end_date_str}'
-        AND prefecture = 'chiba'
-) w
-LEFT JOIN `energy-env.prod_energy_data.calendar_data` c
-    ON w.date = c.date
-ORDER BY w.date, w.hour
-"""
-future_features = client.query(query_future_data).to_dataframe()
-future_features['datetime'] = pd.to_datetime(
-    future_features['date'].astype(str) + ' ' +
-    future_features['hour'].astype(str).str.zfill(2) + ':00:00'
-)
-future_features = future_features.set_index('datetime')
+    ORDER BY date
+    """
+    calendar_data = client.query(query_calendar).to_dataframe()
+    calendar_data['date'] = pd.to_datetime(calendar_data['date']).dt.date
+    calendar_data = calendar_data.set_index('date')
+    logger.info(f"カレンダーデータ取得完了: {len(calendar_data):,}件")
+    print(f"カレンダーデータ取得完了: {len(calendar_data):,}件")
 
-# 循環特徴量追加（hour_sin, hour_cos）
-future_features['hour_sin'] = np.sin(2 * np.pi * future_features['hour'] / 24)
-future_features['hour_cos'] = np.cos(2 * np.pi * future_features['hour'] / 24)
+    # 予測期間の気象・カレンダーデータ取得（未来データ生成用・今日から16日間）
+    logger.info("予測期間の気象・カレンダーデータ取得開始")
+    query_future_data = f"""
+    SELECT
+        w.date,
+        w.hour,
+        w.temperature_2m,
+        w.relative_humidity_2m,
+        w.precipitation,
+        w.weather_code,
+        c.day_of_week,
+        c.is_weekend,
+        c.is_holiday,
+        EXTRACT(MONTH FROM w.date) as month
+    FROM (
+        SELECT *
+        FROM `energy-env.prod_energy_data.weather_data`
+        WHERE date BETWEEN '{today}' AND '{end_date_str}'
+            AND prefecture = 'chiba'
+    ) w
+    LEFT JOIN `energy-env.prod_energy_data.calendar_data` c
+        ON w.date = c.date
+    ORDER BY w.date, w.hour
+    """
+    future_features = client.query(query_future_data).to_dataframe()
+    future_features['datetime'] = pd.to_datetime(
+        future_features['date'].astype(str) + ' ' +
+        future_features['hour'].astype(str).str.zfill(2) + ':00:00'
+    )
+    future_features = future_features.set_index('datetime')
 
-logger.info(f"予測期間の気象・カレンダーデータ取得完了: {len(future_features):,}件")
-print(f"予測期間の気象・カレンダーデータ取得完了: {len(future_features):,}件")
+    # 循環特徴量追加（hour_sin, hour_cos）
+    future_features['hour_sin'] = np.sin(2 * np.pi * future_features['hour'] / 24)
+    future_features['hour_cos'] = np.cos(2 * np.pi * future_features['hour'] / 24)
 
-print(f"データ準備完了")
+    logger.info(f"予測期間の気象・カレンダーデータ取得完了: {len(future_features):,}件")
+    print(f"予測期間の気象・カレンダーデータ取得完了: {len(future_features):,}件")
+
+    print(f"データ準備完了")
+
+except Exception as e:
+    # BigQueryエラー（接続・クエリ実行エラー）をログに記録
+    logger.error(f"BigQueryエラー: {e}")
+    logger.error(f"エラー詳細: {type(e).__name__}")
+    print(f"\nBigQueryエラーが発生しました: {e}")
+    print(f"ログファイルを確認してください: {log_file_path}")
+    # エラーを再送出してプログラム停止
+    raise
 
 # %%
 # ================================================================
