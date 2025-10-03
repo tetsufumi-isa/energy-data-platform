@@ -9,12 +9,12 @@ Phase 10: 日次自動予測システム用
 実行方法:
     # 日次自動実行用（過去10日+予測16日）
     python -m src.data_processing.weather_downloader
-    
+
     # 過去データ分析用（指定日から30日前まで）
     python -m src.data_processing.weather_downloader --date 2025-08-01
-    
-    # 出力ディレクトリ指定
-    python -m src.data_processing.weather_downloader --output-dir data/weather/raw/daily
+
+    # ダウンロードディレクトリ指定
+    python -m src.data_processing.weather_downloader --download-dir data/weather/raw/daily
 """
 
 import os
@@ -22,14 +22,10 @@ import json
 import requests
 import argparse
 import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from logging import getLogger
-
-from src.utils.logging_config import setup_logging
-
-# モジュール専用のロガーを取得
-logger = getLogger('energy_env.data_processing.weather_downloader')
+from google.cloud import bigquery
 
 class WeatherDownloader:
     """Open-Meteo API気象データダウンローダー"""
@@ -52,43 +48,71 @@ class WeatherDownloader:
         'weather_code'
     ]
     
-    def __init__(self, output_dir=None):
+    def __init__(self, download_dir=None):
         """
         初期化
-        
+
         Args:
-            output_dir (str): JSON出力先ディレクトリ
+            download_dir (str): JSONダウンロード先ディレクトリ
         """
-        if output_dir is None:
-            # 環境変数から取得
-            energy_env_path = os.getenv('ENERGY_ENV_PATH')
-            if energy_env_path:
-                output_dir = os.path.join(energy_env_path, 'data', 'weather', 'raw', 'daily')
-            else:
-                output_dir = 'data/weather/raw/daily'
-        
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        
-        logger.info(f"WeatherDownloader initialized with output_dir: {self.output_dir}")
-    
-    def create_robust_session(self):
+        # 環境変数から取得
+        energy_env_path = os.getenv('ENERGY_ENV_PATH')
+        if energy_env_path is None:
+            raise ValueError("ENERGY_ENV_PATH環境変数が設定されていません")
+
+        if download_dir is None:
+            download_dir = os.path.join(energy_env_path, 'data', 'weather', 'raw', 'daily')
+            self.log_dir = Path(energy_env_path) / 'logs' / 'weather_api'
+        else:
+            self.log_dir = Path(download_dir).parent.parent.parent / 'logs' / 'weather_api'
+
+        self.download_dir = Path(download_dir)
+        self.download_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # BigQuery設定
+        self.bq_client = bigquery.Client()
+        self.bq_table_id = "energy-env.prod_energy_data.process_execution_log"
+
+        print(f"WeatherDownloader初期化完了 ダウンロード先: {self.download_dir}")
+
+    def _write_log(self, log_data):
         """
-        レート制限・エラー対応のセッション作成
-        
-        Returns:
-            requests.Session: リトライ設定済みセッション
+        ログをローカルファイルとBigQueryに記録
+
+        Args:
+            log_data (dict): ログデータ
         """
-        session = requests.Session()
-        
-        # ヘッダー設定
-        session.headers.update({
-            'User-Agent': 'energy-env-weather-downloader/1.0',
-            'Accept': 'application/json'
-        })
-        
-        return session
-    
+        # ローカルファイルに記録
+        log_date = log_data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        log_file = self.log_dir / f"{log_date}_weather_execution.jsonl"
+
+        try:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(log_data, ensure_ascii=False) + '\n')
+        except Exception as e:
+            print(f"ログファイル書き込み失敗: {e}")
+
+        # BigQueryに記録
+        try:
+            self.bq_client.insert_rows_json(self.bq_table_id, [log_data])
+        except Exception as e:
+            # BQエラーをローカルログにも記録
+            error_log = {
+                'timestamp': datetime.now().isoformat(),
+                'error_type': 'BQ_INSERT_FAILED',
+                'error_message': str(e),
+                'original_log_data': log_data
+            }
+            error_log_file = self.log_dir / f"{log_date}_bq_errors.jsonl"
+            try:
+                with open(error_log_file, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(error_log, ensure_ascii=False) + '\n')
+            except Exception as file_error:
+                print(f"エラーログファイル書き込み失敗: {file_error}")
+
+            print(f"BigQuery書き込み失敗（ファイルには保存済み・エラーログ記録済み）: {e}")
+
     def download_with_retry(self, session, url, params, max_retries=3):
         """
         リトライ機能付きAPIリクエスト
@@ -113,14 +137,14 @@ class WeatherDownloader:
                     return response
                 elif response.status_code == 429:  # Too Many Requests
                     wait_time = 2 ** attempt  # 指数バックオフ
-                    logger.warning(f"Rate limited, waiting {wait_time}s... (attempt {attempt + 1})")
+                    print(f"レート制限検知、{wait_time}秒待機中... (試行 {attempt + 1}回目)")
                     time.sleep(wait_time)
                     continue
                 else:
                     response.raise_for_status()
-                    
+
             except requests.exceptions.RequestException as e:
-                logger.error(f"Request failed (attempt {attempt + 1}): {e}")
+                print(f"リクエスト失敗 (試行 {attempt + 1}回目): {e}")
                 if attempt == max_retries - 1:
                     raise
                 time.sleep(1)
@@ -148,7 +172,7 @@ class WeatherDownloader:
             'timezone': 'Asia/Tokyo'
         }
         
-        logger.info(f"Downloading historical data: {start_date} to {end_date}")
+        print(f"過去データダウンロード中: {start_date} ～ {end_date}")
         return self.download_with_retry(session, self.HISTORICAL_URL, params)
     
     def get_forecast_data(self, session, forecast_days=16):
@@ -170,31 +194,31 @@ class WeatherDownloader:
             'timezone': 'Asia/Tokyo'
         }
         
-        logger.info(f"Downloading forecast data: {forecast_days} days")
+        print(f"予測データダウンロード中: {forecast_days}日分")
         return self.download_with_retry(session, self.FORECAST_URL, params)
     
     def save_json_response(self, response, filename):
         """
         APIレスポンスを直接JSONファイルとして保存（無駄な変換なし）
-        
+
         Args:
             response (requests.Response): APIレスポンス
             filename (str): 出力ファイル名
-            
+
         Returns:
             str: 保存されたファイルパス
         """
-        output_path = self.output_dir / filename
+        output_path = self.download_dir / filename
         
         try:
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(response.text)  # APIレスポンスを直接保存
-            
-            logger.info(f"Saved weather data: {output_path}")
+
+            print(f"気象データ保存完了: {output_path}")
             return str(output_path)
-            
+
         except Exception as e:
-            logger.error(f"Failed to save JSON file {output_path}: {e}")
+            print(f"JSONファイル保存失敗 {output_path}: {e}")
             raise
     
     def validate_response(self, response):
@@ -264,19 +288,28 @@ class WeatherDownloader:
         
         if target_date is None:
             # ケース1: 基準日無し（日次自動実行用）
-            logger.info("Daily automatic execution mode: historical (10 days ago to 3 days ago) + forecast (16 days)")
-            
+            execution_id = str(uuid.uuid4())
+            started_at = datetime.now()
+            target_date_str = started_at.strftime('%Y-%m-%d')
+
+            print("日次自動実行モード: 過去データ(10日前～3日前) + 予測データ(16日間)")
+
             # 過去データ: 10日前から3日前まで（API遅延考慮）
             historical_start = (today - timedelta(days=10)).strftime('%Y-%m-%d')
             historical_end = (today - timedelta(days=3)).strftime('%Y-%m-%d')
-            
+
             # ファイル名用の日付（今日）
             date_part = today.strftime('%m%d')
             year = today.year
-            
-            session = self.create_robust_session()
+
+            # HTTPセッション作成・ヘッダー設定
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'energy-env-weather-downloader/1.0',
+                'Accept': 'application/json'
+            })
             results = {'historical': [], 'forecast': []}
-            
+
             try:
                 # 1. 過去データ取得
                 historical_response = self.get_historical_data(session, historical_start, historical_end)
@@ -284,7 +317,7 @@ class WeatherDownloader:
                 # レスポンス検証
                 validation = self.validate_response(historical_response)
                 if not validation['valid']:
-                    logger.warning(f"Historical data validation issues: {validation['issues']}")
+                        print(f"過去データ検証問題: {validation['issues']}")
                 
                 # ファイル名: chiba_2025_0818_historical.json
                 historical_filename = f"chiba_{year}_{date_part}_historical.json"
@@ -303,7 +336,7 @@ class WeatherDownloader:
                 # レスポンス検証
                 validation = self.validate_response(forecast_response)
                 if not validation['valid']:
-                    logger.warning(f"Forecast data validation issues: {validation['issues']}")
+                        print(f"予測データ検証問題: {validation['issues']}")
                 
                 # ファイル名: chiba_2025_0818_forecast.json
                 forecast_filename = f"chiba_{year}_{date_part}_forecast.json"
@@ -316,11 +349,61 @@ class WeatherDownloader:
                     'validation': validation
                 })
                 
-                logger.info("Daily automatic weather data download completed successfully")
+                # 成功ログ記録
+                completed_at = datetime.now()
+                duration_seconds = int((completed_at - started_at).total_seconds())
+                total_data_points = sum([item['data_points'] for item in results['historical']]) + \
+                                   sum([item['data_points'] for item in results['forecast']])
+
+                log_data = {
+                    "execution_id": execution_id,
+                    "date": target_date_str,
+                    "process_type": "WEATHER_API",
+                    "status": "SUCCESS",
+                    "error_message": None,
+                    "started_at": started_at.isoformat(),
+                    "completed_at": completed_at.isoformat(),
+                    "duration_seconds": duration_seconds,
+                    "records_processed": total_data_points,
+                    "file_size_mb": None,
+                    "additional_info": {
+                        "mode": "daily_automatic",
+                        "historical_period": f"{historical_start} to {historical_end}",
+                        "forecast_days": 16,
+                        "historical_files": len(results['historical']),
+                        "forecast_files": len(results['forecast'])
+                    }
+                }
+
+                self._write_log(log_data)
+                print("日次自動気象データダウンロード完了")
                 return results
-                
+
             except Exception as e:
-                logger.error(f"Daily automatic weather data download failed: {e}")
+                # エラーログ記録
+                completed_at = datetime.now()
+                duration_seconds = int((completed_at - started_at).total_seconds())
+
+                log_data = {
+                    "execution_id": execution_id,
+                    "date": target_date_str,
+                    "process_type": "WEATHER_API",
+                    "status": "FAILED",
+                    "error_message": str(e),
+                    "started_at": started_at.isoformat(),
+                    "completed_at": completed_at.isoformat(),
+                    "duration_seconds": duration_seconds,
+                    "records_processed": None,
+                    "file_size_mb": None,
+                    "additional_info": {
+                        "mode": "daily_automatic",
+                        "historical_period": f"{historical_start} to {historical_end}",
+                        "forecast_days": 16
+                    }
+                }
+
+                self._write_log(log_data)
+                print(f"日次自動気象データダウンロード失敗: {e}")
                 raise
             finally:
                 session.close()
@@ -331,8 +414,12 @@ class WeatherDownloader:
                 target_dt = datetime.strptime(target_date, '%Y-%m-%d')
             except ValueError:
                 raise ValueError(f"Invalid date format. Use YYYY-MM-DD format.")
-            
-            logger.info(f"Historical analysis mode: {target_date} and 30 days before")
+
+            execution_id = str(uuid.uuid4())
+            started_at = datetime.now()
+            target_date_str = target_date
+
+            print(f"過去データ分析モード: {target_date} から30日前まで")
             
             # 過去データ: 指定日から30日前まで
             historical_start = (target_dt - timedelta(days=30)).strftime('%Y-%m-%d')
@@ -341,8 +428,13 @@ class WeatherDownloader:
             # ファイル名用の日付（指定日）
             date_part = target_dt.strftime('%m%d')
             year = target_dt.year
-            
-            session = self.create_robust_session()
+
+            # HTTPセッション作成・ヘッダー設定
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'energy-env-weather-downloader/1.0',
+                'Accept': 'application/json'
+            })
             results = {'historical': [], 'forecast': []}
             
             try:
@@ -352,7 +444,7 @@ class WeatherDownloader:
                 # レスポンス検証
                 validation = self.validate_response(historical_response)
                 if not validation['valid']:
-                    logger.warning(f"Historical data validation issues: {validation['issues']}")
+                        print(f"過去データ検証問題: {validation['issues']}")
                 
                 # ファイル名: chiba_2025_0801_historical_30days.json
                 historical_filename = f"chiba_{year}_{date_part}_historical_30days.json"
@@ -365,11 +457,57 @@ class WeatherDownloader:
                     'validation': validation
                 })
                 
-                logger.info(f"Historical analysis weather data download completed for {target_date}")
+                # 成功ログ記録
+                completed_at = datetime.now()
+                duration_seconds = int((completed_at - started_at).total_seconds())
+                total_data_points = sum([item['data_points'] for item in results['historical']])
+
+                log_data = {
+                    "execution_id": execution_id,
+                    "date": target_date_str,
+                    "process_type": "WEATHER_API",
+                    "status": "SUCCESS",
+                    "error_message": None,
+                    "started_at": started_at.isoformat(),
+                    "completed_at": completed_at.isoformat(),
+                    "duration_seconds": duration_seconds,
+                    "records_processed": total_data_points,
+                    "file_size_mb": None,
+                    "additional_info": {
+                        "mode": "historical_analysis",
+                        "historical_period": f"{historical_start} to {historical_end}",
+                        "historical_files": len(results['historical'])
+                    }
+                }
+
+                self._write_log(log_data)
+                print(f"過去データ分析用気象データダウンロード完了: {target_date}")
                 return results
-                
+
             except Exception as e:
-                logger.error(f"Historical analysis weather data download failed: {e}")
+                # エラーログ記録
+                completed_at = datetime.now()
+                duration_seconds = int((completed_at - started_at).total_seconds())
+
+                log_data = {
+                    "execution_id": execution_id,
+                    "date": target_date_str,
+                    "process_type": "WEATHER_API",
+                    "status": "FAILED",
+                    "error_message": str(e),
+                    "started_at": started_at.isoformat(),
+                    "completed_at": completed_at.isoformat(),
+                    "duration_seconds": duration_seconds,
+                    "records_processed": None,
+                    "file_size_mb": None,
+                    "additional_info": {
+                        "mode": "historical_analysis",
+                        "historical_period": f"{historical_start} to {historical_end}"
+                    }
+                }
+
+                self._write_log(log_data)
+                print(f"過去データ分析用気象データダウンロード失敗: {e}")
                 raise
             finally:
                 session.close()
@@ -407,14 +545,11 @@ def print_results(results):
 
 def main():
     """メイン関数"""
-    # ログ設定を初期化
-    setup_logging()
-    
     parser = argparse.ArgumentParser(description='Open-Meteo気象データダウンローダー（修正版）')
     parser.add_argument('--date', type=str,
                        help='基準日 (YYYY-MM-DD形式) 指定なし:日次自動実行用、指定あり:過去データ分析用')
-    parser.add_argument('--output-dir', type=str,
-                       help='出力ディレクトリパス')
+    parser.add_argument('--download-dir', type=str,
+                       help='ダウンロードディレクトリパス')
     
     args = parser.parse_args()
     
@@ -434,7 +569,7 @@ def main():
     
     try:
         # WeatherDownloader初期化
-        downloader = WeatherDownloader(args.output_dir)
+        downloader = WeatherDownloader(args.download_dir)
         
         # 気象データダウンロード実行
         results = downloader.download_daily_weather_data(args.date)
@@ -443,7 +578,6 @@ def main():
         print_results(results)
         
     except Exception as e:
-        logger.error(f"Weather download failed: {e}")
         print(f"💥 ダウンロードエラー: {e}")
         return
     

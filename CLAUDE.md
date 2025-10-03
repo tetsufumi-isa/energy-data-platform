@@ -14,11 +14,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **プロジェクトID**: （環境変数から取得）
 **データセット**: `energy_data`
 
-## プロジェクト現在地
+## プロジェクト概要（固定情報）
 
-**Phase**: 11実装中（予測コードBQ対応完了・ログシステムリファクタリング完了）  
-**予測精度**: MAPE 3.43%（段階的予測・実用レベル達成）  
-**技術スタック**: Python 3.12 + XGBoost + GCP + Looker Studio  
+**Phase**: 11（基盤整備→日次運用→予測精度分析）
+**予測精度**: MAPE 3.43%（段階的予測・実用レベル達成）
+**技術スタック**: Python 3.12 + XGBoost + GCP + Looker Studio
 **環境変数**: `ENERGY_ENV_PATH=C:\Users\tetsu\dev\energy-env`
 
 ## 実行コマンド
@@ -51,14 +51,12 @@ python -m src.utils.check_ml_features_missing
 
 **まず確認**: `learning_memos/INDEX.md` - 全ファイル構成とClaude推奨参照順
 
-**最新セッション**: `learning_memos/20251002_Phase11_予測結果BQ保存実装・TODO整理完了.md` - prediction_iterative_with_export.pyコードレビュー完全完了・予測結果BQ保存実装・Phase 11実装TODO整理
-
 | 質問タイプ | 参照先 |
 |-----------|--------|
-| 進捗・次ステップ | INDEX.mdの「最優先参照」→現在地ファイル |
-| Phase詳細・技術概要 | INDEX.mdの「Phase別学習記録」 |
-| システム設計・フロー | INDEX.mdの「全体設計」→システムフロー.md |
-| 技術実装詳細 | INDEX.mdの「技術実装メモ」 |
+| 進捗・次ステップ | `learning_memos/INDEX.md`の「最優先参照」→最新進捗ファイル |
+| Phase詳細・技術概要 | `learning_memos/INDEX.md`の「Phase別学習記録」 |
+| システム設計・フロー | `learning_memos/INDEX.md`の「全体設計」→システムフロー.md |
+| 技術実装詳細 | `learning_memos/INDEX.md`の「技術実装メモ」 |
 | コード実装・エラー | `src/` ディレクトリ直接参照 |
 
 ## 主要ファイル位置
@@ -68,11 +66,9 @@ python -m src.utils.check_ml_features_missing
 - **GCSアップロード**: `src/data_processing/gcs_uploader.py`
 - **ログ設定**: `src/utils/logging_config.py`
 
-## Phase 11実装方針
+## Phase 11実装方針（固定）
 
-Phase 11は「基盤整備→日次運用→予測精度分析」の3段階で進行中。
-
-**詳細な進捗・次回TODO**: 最新セッションファイル（`learning_memos/20251002_Phase11_*.md`）を参照
+Phase 11は「基盤整備→日次運用→予測精度分析」の3段階で進行。
 
 ### 大まかな実装フェーズ
 1. **基盤修正フェーズ**
@@ -85,23 +81,24 @@ Phase 11は「基盤整備→日次運用→予測精度分析」の3段階で�
 3. **予測精度分析実装**
    - 16日に1回の検証テーブル・精度ダッシュボード
 
-**完了状況**: 予測コードBQ対応・統合ログシステム実装・ML_PREDICTIONステータスログ保存・日次実行対応（検証分離・データ最適化）・BQエラーハンドリング実装（ML_PREDICTION・TEPCO_API）・予測結果BQ保存実装（prediction_resultsテーブル）・コードレビュー完全完了
-
-**進捗管理ルール**: セッション終了時に最新進捗mdファイルを作成し、このCLAUDE.mdの「最新セッション」と「完了状況」を更新する
+**詳細な進捗・次回TODO**: `learning_memos/INDEX.md`の「最優先参照」から最新進捗ファイルを確認
 
 ## セッション開始時の動作
 
 **重要**: チャット立ち上げ時は以下の手順で進捗を確認してください：
 
-1. **最新セッションファイルを読み込み**
-   - 上記の「最新セッション」に記載されているファイルパスを読み込む
+1. **INDEX.mdを読み込み**
+   - `learning_memos/INDEX.md`の「最優先参照」セクションを確認
+   - 最新進捗ファイルのパスを特定
+
+2. **最新進捗ファイルを読み込み**
    - ファイル内のTODOセクションを確認
 
-2. **TodoWriteツールでTODOを記録**
-   - 最新セッションファイルから抽出したTODOをTodoWriteツールに登録
+3. **TodoWriteツールでTODOを記録**
+   - 最新進捗ファイルから抽出したTODOをTodoWriteツールに登録
    - 全てのTODOを`pending`ステータスで記録
 
-3. **ユーザーに進捗を報告**
+4. **ユーザーに進捗を報告**
    - チャット開始時に「今回のTODOです」として一覧を表示
    - 現在のフェーズと次に取り組むタスクを明示
 
@@ -114,7 +111,36 @@ NEVER proactively create documentation files (*.md) or README files. Only create
 ## コーディング方針
 - コード内に絵文字使わない
 - コード内で絵文字見つけたら修正する
+- **ログとprint文は日本語で記述**
+  - `print()`による出力は原則日本語
+  - ログファイルへの記録も日本語
+  - エラーメッセージも日本語（例外の`str(e)`は除く）
 
 ## コミュニケーション方針
 - **必ず日本語で対応する** - プロジェクト概要・技術説明・進捗報告など全て日本語
 - 英語での説明・表記は行わない（コード内コメント・変数名は除く）
+
+## 進捗管理ルール
+
+### セッション実行中のTODO管理
+- **作業開始時**: `pending` → `in_progress`に変更
+- **実装完了時**: `in_progress`のまま保持（ユーザーレビュー待ち）
+- **ユーザー承認時**: `in_progress` → `completed`に変更
+- **中断時**: `in_progress` → `pending`に戻す
+
+### セッション終了時の更新作業
+
+**トリガーワード**: ユーザーが「**進捗管理更新**」と言ったら以下を実行：
+
+1. **最新進捗mdファイル作成**
+   - ファイル名形式: `YYYYMMDD_Phase11_[セッション内容サマリー].md`
+   - 内容構成:
+     - セッション概要
+     - 主要成果
+     - 技術的理解の向上
+     - 次回セッション予定
+     - **TODOリスト全体**（末尾に記載、ステータス含む）
+
+2. **INDEX.md更新**
+   - `learning_memos/INDEX.md`の「最優先参照」セクションを新ファイルに更新
+   - 「進捗・成果記録」セクションに新ファイルを追加
