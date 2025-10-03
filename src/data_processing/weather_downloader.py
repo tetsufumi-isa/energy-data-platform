@@ -146,10 +146,11 @@ class WeatherDownloader:
             except requests.exceptions.RequestException as e:
                 print(f"リクエスト失敗 (試行 {attempt + 1}回目): {e}")
                 if attempt == max_retries - 1:
-                    raise
+                    raise  # 最後の試行で失敗した場合は元の例外を投げる
                 time.sleep(1)
-        
-        raise Exception(f"Failed to get response after {max_retries} attempts")
+
+        # forループが正常終了（全試行で429レート制限のみ発生）した場合にここに到達
+        raise Exception(f"{max_retries}回の試行後もレート制限が続き、応答取得に失敗しました")
     
     def get_historical_data(self, session, start_date, end_date):
         """
@@ -244,7 +245,7 @@ class WeatherDownloader:
             # 基本構造チェック
             if 'hourly' not in data:
                 validation_result['valid'] = False
-                validation_result['issues'].append("Missing 'hourly' data")
+                validation_result['issues'].append("'hourly'データが見つかりません")
                 return validation_result
             
             hourly_data = data['hourly']
@@ -257,7 +258,7 @@ class WeatherDownloader:
             
             if missing_vars:
                 validation_result['valid'] = False
-                validation_result['issues'].append(f"Missing variables: {missing_vars}")
+                validation_result['issues'].append(f"欠けている変数: {missing_vars}")
             
             # データポイント数カウント
             if 'time' in hourly_data:
@@ -265,10 +266,10 @@ class WeatherDownloader:
             
         except json.JSONDecodeError as e:
             validation_result['valid'] = False
-            validation_result['issues'].append(f"JSON decode error: {e}")
+            validation_result['issues'].append(f"JSONデコードエラー: {e}")
         except Exception as e:
             validation_result['valid'] = False
-            validation_result['issues'].append(f"Validation error: {e}")
+            validation_result['issues'].append(f"検証エラー: {e}")
         
         return validation_result
     
@@ -313,13 +314,14 @@ class WeatherDownloader:
             try:
                 # 1. 過去データ取得
                 historical_response = self.get_historical_data(session, historical_start, historical_end)
-                
+
                 # レスポンス検証
                 validation = self.validate_response(historical_response)
                 if not validation['valid']:
                         print(f"過去データ検証問題: {validation['issues']}")
+                        raise ValueError(f"過去データ検証失敗: {validation['issues']}")
                 
-                # ファイル名: chiba_2025_0818_historical.json
+                # ファイル名
                 historical_filename = f"chiba_{year}_{date_part}_historical.json"
                 historical_path = self.save_json_response(historical_response, historical_filename)
                 
@@ -332,13 +334,14 @@ class WeatherDownloader:
                 
                 # 2. 予測データ取得
                 forecast_response = self.get_forecast_data(session, forecast_days=16)
-                
+
                 # レスポンス検証
                 validation = self.validate_response(forecast_response)
                 if not validation['valid']:
                         print(f"予測データ検証問題: {validation['issues']}")
+                        raise ValueError(f"予測データ検証失敗: {validation['issues']}")
                 
-                # ファイル名: chiba_2025_0818_forecast.json
+                # ファイル名
                 forecast_filename = f"chiba_{year}_{date_part}_forecast.json"
                 forecast_path = self.save_json_response(forecast_response, forecast_filename)
                 
@@ -413,7 +416,7 @@ class WeatherDownloader:
             try:
                 target_dt = datetime.strptime(target_date, '%Y-%m-%d')
             except ValueError:
-                raise ValueError(f"Invalid date format. Use YYYY-MM-DD format.")
+                raise ValueError(f"日付形式が不正です。YYYY-MM-DD形式を使用してください。")
 
             execution_id = str(uuid.uuid4())
             started_at = datetime.now()
