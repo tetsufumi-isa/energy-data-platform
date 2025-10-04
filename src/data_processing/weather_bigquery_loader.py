@@ -1,5 +1,5 @@
 """
-気象データBigQuery投入システム
+気象データBigQuery投入システム（JSON対応版）
 
 実行方法:
     python -m src.data_processing.weather_bigquery_loader                    # デフォルト: forecast
@@ -8,11 +8,12 @@
 """
 
 import argparse
+import json
+import os
 from datetime import datetime
 from pathlib import Path
 from logging import getLogger
 from google.cloud import bigquery
-from google.cloud import storage
 
 from src.utils.logging_config import setup_logging
 
@@ -20,254 +21,223 @@ from src.utils.logging_config import setup_logging
 logger = getLogger('energy_env.data_processing.weather_bigquery_loader')
 
 class WeatherBigQueryLoader:
-    """気象データをBigQueryに投入するクラス"""
-    
-    def __init__(self, project_id="energy-env", bucket_name="energy-env-data"):
+    """気象データをBigQueryに投入するクラス（JSON対応）"""
+
+    def __init__(self, project_id="energy-env", json_dir=None):
         """
         初期化
-        
+
         Args:
             project_id (str): GCPプロジェクトID
-            bucket_name (str): GCSバケット名
+            json_dir (str): JSONファイル格納ディレクトリ
         """
         self.project_id = project_id
-        self.bucket_name = bucket_name
         self.dataset_id = "dev_energy_data"
         self.table_id = "weather_data"
-        
-        # BigQueryとGCSクライアントの初期化
+
+        # JSONディレクトリ設定
+        energy_env_path = os.getenv('ENERGY_ENV_PATH')
+        if energy_env_path is None:
+            raise ValueError("ENERGY_ENV_PATH環境変数が設定されていません")
+
+        if json_dir is None:
+            self.json_dir = Path(energy_env_path) / 'data' / 'weather' / 'raw' / 'daily'
+        else:
+            self.json_dir = Path(json_dir)
+
+        # BigQueryクライアントの初期化
         self.bq_client = bigquery.Client(project=project_id)
-        self.gcs_client = storage.Client(project=project_id)
-        self.bucket = self.gcs_client.bucket(bucket_name)
-        
-        logger.info(f"WeatherBigQueryLoader initialized: {project_id}")
+
+        logger.info(f"WeatherBigQueryLoader初期化完了: {project_id}, JSONディレクトリ: {self.json_dir}")
     
-    def get_unprocessed_files(self, data_type="forecast"):
+    def get_unprocessed_json_files(self, data_type="forecast"):
         """
-        未処理ファイルの一覧を取得
-        
+        未処理JSONファイルの一覧を取得
+
         Args:
             data_type (str): "historical" | "forecast"
-            
+
         Returns:
-            list: 未処理ファイルのGCS URIリスト
-            
-        Raises:
-            ValueError: CSV以外のファイルが存在する場合
+            list: 未処理JSONファイルのパスリスト
         """
-        prefix = f"weather_processed/{data_type}/"
-        
-        # delimiter="/" で直下のファイルのみ取得
-        blobs = self.gcs_client.list_blobs(
-            self.bucket_name, 
-            prefix=prefix, 
-            delimiter="/"
-        )
-        
-        unprocessed_files = []
-        for blob in blobs:
-            # CSV以外のファイルがあればエラー
-            if not blob.name.endswith('.csv'):
-                raise ValueError(f"Unexpected non-CSV file found: {blob.name}")
-            
-            unprocessed_files.append(f"gs://{self.bucket_name}/{blob.name}")
-        
-        logger.info(f"Found {len(unprocessed_files)} unprocessed files in {data_type}")
-        return unprocessed_files
+        pattern = f"*_{data_type}.json"
+        json_files = list(self.json_dir.glob(pattern))
+
+        logger.info(f"{data_type}タイプのJSONファイル {len(json_files)}個を検出")
+        return json_files
     
-    def create_external_table(self, file_uris):
+    def parse_json_to_rows(self, json_file_path):
         """
-        EXTERNAL TABLEを作成（生SQL実行）
-        
+        JSONファイルを解析してBQインサート用の行データに変換
+
         Args:
-            file_uris (list): 処理対象ファイルのGCS URIリスト
+            json_file_path (Path): JSONファイルパス
+
+        Returns:
+            list: BQインサート用の辞書のリスト
         """
-        if not file_uris:
-            logger.warning("No files to process")
-            return
-        
-        # GCS URIをSQL配列形式に変換
-        uris_str = "', '".join(file_uris)
-        
-        create_sql = f"""
-        CREATE OR REPLACE EXTERNAL TABLE `{self.project_id}.{self.dataset_id}.temp_weather_external`
-        (
-            prefecture STRING,
-            date STRING,
-            hour STRING,
-            temperature_2m FLOAT64,
-            relative_humidity_2m FLOAT64,
-            precipitation FLOAT64,
-            weather_code INT64
-        )
-        OPTIONS (
-            format = 'CSV',
-            uris = ['{uris_str}'],
-            skip_leading_rows = 1
-        );
-        """
-        
-        # 直接SQL文を実行
-        job = self.bq_client.query(create_sql)
-        job.result()  # 完了まで待機
-        
-        logger.info(f"Created external table: {self.project_id}.{self.dataset_id}.temp_weather_external with {len(file_uris)} files")
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        hourly_data = data.get('hourly', {})
+        times = hourly_data.get('time', [])
+        temps = hourly_data.get('temperature_2m', [])
+        humidity = hourly_data.get('relative_humidity_2m', [])
+        precip = hourly_data.get('precipitation', [])
+        weather_codes = hourly_data.get('weather_code', [])
+
+        rows = []
+        for i, time_str in enumerate(times):
+            # time: "2024-10-01T00:00" → date: "2024-10-01", hour: "00"
+            dt = datetime.fromisoformat(time_str)
+            date_str = dt.strftime('%Y-%m-%d')
+            hour_str = dt.strftime('%H')
+
+            row = {
+                'prefecture': '千葉県',
+                'date': date_str,
+                'hour': hour_str,
+                'temperature_2m': temps[i] if i < len(temps) else None,
+                'relative_humidity_2m': humidity[i] if i < len(humidity) else None,
+                'precipitation': precip[i] if i < len(precip) else None,
+                'weather_code': weather_codes[i] if i < len(weather_codes) else None,
+                'created_at': datetime.now().isoformat()
+            }
+            rows.append(row)
+
+        logger.info(f"JSONファイル解析完了: {json_file_path.name}, {len(rows)}行")
+        return rows
     
-    def delete_duplicate_data(self):
+    def delete_duplicate_data(self, rows):
         """
-        重複データを削除（パーティション絞り込み + CONCAT方式）
+        重複データを削除（インサート予定データと重複する既存データを削除）
+
+        Args:
+            rows (list): インサート予定のデータ行
         """
+        if not rows:
+            logger.info("削除対象データなし")
+            return
+
+        # インサート予定データから日付範囲を取得
+        dates = [row['date'] for row in rows]
+        min_date = min(dates)
+        max_date = max(dates)
+
         delete_query = f"""
-        DELETE FROM `{self.project_id}.{self.dataset_id}.{self.table_id}` 
-        WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-          AND date <= CURRENT_DATE()
-          AND CONCAT(prefecture, '|', CAST(date AS STRING), '|', hour) IN (
-              SELECT CONCAT(prefecture, '|', CAST(PARSE_DATE('%Y-%m-%d', date) AS STRING), '|', hour)
-              FROM `{self.project_id}.{self.dataset_id}.temp_weather_external`
-              WHERE PARSE_DATE('%Y-%m-%d', date) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
-          )
+        DELETE FROM `{self.project_id}.{self.dataset_id}.{self.table_id}`
+        WHERE date >= '{min_date}'
+          AND date <= '{max_date}'
+          AND prefecture = '千葉県'
         """
-        
+
         job = self.bq_client.query(delete_query)
         result = job.result()
-        
-        logger.info(f"Deleted duplicate data: {job.num_dml_affected_rows} rows")
+
+        logger.info(f"重複データ削除完了: {job.num_dml_affected_rows}行削除（期間: {min_date}～{max_date}）")
     
-    def insert_weather_data(self):
+    def insert_weather_data(self, rows):
         """
         気象データをBigQueryに投入
-        """
-        insert_query = f"""
-        INSERT INTO `{self.project_id}.{self.dataset_id}.{self.table_id}`
-        (prefecture, date, hour, temperature_2m, relative_humidity_2m, precipitation, weather_code, created_at)
-        SELECT 
-            prefecture,
-            PARSE_DATE('%Y-%m-%d', date) as date,
-            hour,
-            temperature_2m,
-            relative_humidity_2m,
-            precipitation,
-            weather_code,
-            CURRENT_TIMESTAMP() as created_at
-        FROM `{self.project_id}.{self.dataset_id}.temp_weather_external`
-        """
-        
-        job = self.bq_client.query(insert_query)
-        result = job.result()
-        
-        logger.info(f"Inserted weather data: {job.num_dml_affected_rows} rows")
-        return job.num_dml_affected_rows
-    
-    def drop_external_table(self):
-        """
-        EXTERNAL TABLEを削除
-        """
-        external_table_id = f"{self.project_id}.{self.dataset_id}.temp_weather_external"
-        
-        try:
-            self.bq_client.delete_table(external_table_id)
-            logger.info(f"Dropped external table: {external_table_id}")
-        except Exception as e:
-            logger.warning(f"Failed to drop external table: {e}")
-    
-    def move_processed_files(self, processed_uris, data_type="forecast"):
-        """
-        処理済みファイルを移動
-        
+
         Args:
-            processed_uris (list): 処理済みファイルのGCS URIリスト
-            data_type (str): "historical" | "forecast"
+            rows (list): BQインサート用のデータ行
+
+        Returns:
+            int: インサート行数
         """
+        if not rows:
+            logger.info("インサート対象データなし")
+            return 0
+
+        table_ref = f"{self.project_id}.{self.dataset_id}.{self.table_id}"
+        errors = self.bq_client.insert_rows_json(table_ref, rows)
+
+        if errors:
+            error_msg = f"BQインサートエラー: {errors}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+
+        logger.info(f"気象データインサート完了: {len(rows)}行")
+        return len(rows)
+    
+    def move_processed_files(self, json_files):
+        """
+        処理済みJSONファイルをアーカイブディレクトリに移動
+
+        Args:
+            json_files (list): 処理済みJSONファイルのパスリスト
+        """
+        archive_dir = self.json_dir / 'archive'
+        archive_dir.mkdir(exist_ok=True)
+
         moved_count = 0
-        
-        for uri in processed_uris:
+        for json_file in json_files:
             try:
-                # GCS URIからファイルパスを抽出
-                file_path = uri.replace(f"gs://{self.bucket_name}/", "")
-                file_name = Path(file_path).name
-                
-                # 移動先パス
-                destination_path = f"weather_processed/{data_type}/insert_completed/{file_name}"
-                
-                # ファイルをコピー
-                source_blob = self.bucket.blob(file_path)
-                destination_blob = self.bucket.blob(destination_path)
-                
-                # コピー実行
-                destination_blob.upload_from_string(source_blob.download_as_text())
-                
-                # 元ファイルを削除
-                source_blob.delete()
-                
+                archive_path = archive_dir / json_file.name
+                json_file.rename(archive_path)
                 moved_count += 1
-                logger.info(f"Moved processed file: {file_name}")
-                
+                logger.info(f"処理済みファイル移動: {json_file.name} → archive/")
             except Exception as e:
-                logger.error(f"Failed to move file {uri}: {e}")
-        
-        logger.info(f"Moved {moved_count} processed files to insert_completed/")
+                logger.error(f"ファイル移動失敗 {json_file.name}: {e}")
+
+        logger.info(f"処理済みファイル {moved_count}個をarchive/に移動")
     
     def load_weather_data(self, data_type="forecast"):
         """
         気象データをBigQueryに投入するメイン処理
-        
+
         Args:
             data_type (str): "historical" | "forecast"
-            
+
         Returns:
             dict: 処理結果
         """
-        logger.info(f"Starting weather data load: {data_type}")
-        
+        logger.info(f"気象データBQ投入開始: {data_type}")
+
         try:
-            # 1. 未処理ファイルを取得
-            unprocessed_files = self.get_unprocessed_files(data_type)
-            
-            if not unprocessed_files:
-                logger.info("No unprocessed files found")
+            # 1. 未処理JSONファイルを取得
+            json_files = self.get_unprocessed_json_files(data_type)
+
+            if not json_files:
+                logger.info("未処理ファイルなし")
                 return {
                     'status': 'success',
-                    'message': 'No files to process',
+                    'message': '処理対象ファイルなし',
                     'files_processed': 0,
                     'rows_inserted': 0
                 }
-            
-            # 2. EXTERNAL TABLE作成
-            self.create_external_table(unprocessed_files)
-            
+
+            # 2. JSONファイルを解析してBQ用データに変換
+            all_rows = []
+            for json_file in json_files:
+                rows = self.parse_json_to_rows(json_file)
+                all_rows.extend(rows)
+
             # 3. 重複データ削除
-            self.delete_duplicate_data()
-            
+            self.delete_duplicate_data(all_rows)
+
             # 4. データ投入
-            rows_inserted = self.insert_weather_data()
-            
-            # 5. EXTERNAL TABLE削除
-            self.drop_external_table()
-            
-            # 6. 成功時のみファイル移動
-            self.move_processed_files(unprocessed_files, data_type)
-            
-            logger.info(f"Weather data load completed: {len(unprocessed_files)} files, {rows_inserted} rows")
-            
+            rows_inserted = self.insert_weather_data(all_rows)
+
+            # 5. 成功時のみファイル移動
+            self.move_processed_files(json_files)
+
+            logger.info(f"気象データBQ投入完了: {len(json_files)}ファイル, {rows_inserted}行")
+
             return {
                 'status': 'success',
-                'message': f'Successfully loaded {len(unprocessed_files)} files',
-                'files_processed': len(unprocessed_files),
+                'message': f'{len(json_files)}ファイルの投入成功',
+                'files_processed': len(json_files),
                 'rows_inserted': rows_inserted
             }
-            
+
         except Exception as e:
-            logger.error(f"Weather data load failed: {e}")
-            
-            # エラー時はEXTERNAL TABLEを削除
-            try:
-                self.drop_external_table()
-            except:
-                pass
-            
+            logger.error(f"気象データBQ投入失敗: {e}")
+
             return {
                 'status': 'failed',
-                'message': f'Load failed: {str(e)}',
+                'message': f'投入失敗: {str(e)}',
                 'files_processed': 0,
                 'rows_inserted': 0
             }
@@ -276,15 +246,12 @@ class WeatherBigQueryLoader:
 def print_load_results(results):
     """投入結果を表示"""
     print(f"\n{'='*60}")
-    print("📊 気象データBigQuery投入結果")
+    print("気象データBigQuery投入結果")
     print('='*60)
-    
-    status_emoji = {
-        'success': '✅',
-        'failed': '❌'
-    }
-    
-    print(f"\n{status_emoji[results['status']]} 処理結果")
+
+    status_mark = '成功' if results['status'] == 'success' else '失敗'
+
+    print(f"\n処理結果: {status_mark}")
     print(f"メッセージ: {results['message']}")
     print(f"処理ファイル数: {results['files_processed']}")
     print(f"投入レコード数: {results['rows_inserted']}")
@@ -295,31 +262,30 @@ def main():
     """メイン関数"""
     # ログ設定を初期化
     setup_logging()
-    
-    parser = argparse.ArgumentParser(description='気象データBigQuery投入システム')
+
+    parser = argparse.ArgumentParser(description='気象データBigQuery投入システム（JSON対応）')
     parser.add_argument('--data-type', type=str, default='forecast',
                        choices=['historical', 'forecast'],
                        help='データタイプ (historical: 過去データ, forecast: 予測データ)')
     parser.add_argument('--project-id', type=str, default='energy-env',
                        help='GCPプロジェクトID')
-    parser.add_argument('--bucket', type=str, default='energy-env-data',
-                       help='GCSバケット名')
-    
+    parser.add_argument('--json-dir', type=str, default=None,
+                       help='JSONファイル格納ディレクトリ')
+
     args = parser.parse_args()
-    
-    print("🚀 気象データBigQuery投入システム開始")
-    print(f"📊 データタイプ: {args.data_type}")
-    print(f"☁️  プロジェクト: {args.project_id}")
-    print(f"📂 バケット: {args.bucket}")
-    
+
+    print("気象データBigQuery投入システム開始")
+    print(f"データタイプ: {args.data_type}")
+    print(f"プロジェクト: {args.project_id}")
+
     # 投入処理実行
-    loader = WeatherBigQueryLoader(args.project_id, args.bucket)
+    loader = WeatherBigQueryLoader(args.project_id, args.json_dir)
     results = loader.load_weather_data(args.data_type)
-    
+
     # 結果表示
     print_load_results(results)
-    
-    print("🏁 処理完了")
+
+    print("処理完了")
 
 
 if __name__ == "__main__":

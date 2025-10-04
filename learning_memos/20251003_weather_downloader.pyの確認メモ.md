@@ -43,7 +43,18 @@
                     ・validate_response(historical_response)を実行
                         ・HTTPセッションから実際に使うデータだけを抜き出し無いように欠損がないかチェックして返す
                         ・エラーがあればフラグで確認できるのでraiseを実行
-                            ・ここでのraiseは外側のtryでキャッチしてエラーログを保存 
+                            ・ここでのraiseは外側のtryでキャッチしてエラーログを保存
+                ・historical_filenameとしてjsonのファイルパスを作成
+                ・historical_path = self.save_json_response(historical_response, historical_filename)を実行
+                    ・データを書き込みして保存してファイルパスを返す
+                    ・エラーであればraiseで呼び出しもとにエラーを返す
+                ・resultsに過去データ書き込みの概要を記載
+                    ・過去データの記載内容
+                        ・ダウンロードデータのファイルパス
+                        ・ダウンロード期間
+                        ・データ件数(time)を数える
+                            ・validation_resultの中に入っている
+                        ・save_json_responseで作成して受け取ったvalidation_result
             
             
             
@@ -126,5 +137,16 @@
             ・JSONデコードエラー
             ・その他エラー
         ・validation_resultを返す
+            ・validation_resultの形式
+                {
+                    'valid': True,                  --フラグ
+                    'issues': [],                   --問題が発生した際に内容を文章で記載
+                    'stats': {'total_hours': 192}   --例：192時間分のデータ
+                }
+
     ★HTTPセッションから実際に使うデータだけを抜き出し無いように欠損がないかチェックして返す
     　
+
+    ・def save_json_response(self, response, filename)
+        ・受け取ったデータを書き込みして保存
+    ★受け取ったデータを書き込みして保存しファイルパスを返す、エラーであれraiseでエラーを返す
