@@ -10,15 +10,10 @@
 import argparse
 import json
 import os
+import uuid
 from datetime import datetime
 from pathlib import Path
-from logging import getLogger
 from google.cloud import bigquery
-
-from src.utils.logging_config import setup_logging
-
-# モジュール専用のロガーを取得
-logger = getLogger('energy_env.data_processing.weather_bigquery_loader')
 
 class WeatherBigQueryLoader:
     """気象データをBigQueryに投入するクラス（JSON対応）"""
@@ -45,10 +40,17 @@ class WeatherBigQueryLoader:
         else:
             self.json_dir = Path(json_dir)
 
+        # ログディレクトリ設定
+        self.log_dir = Path(energy_env_path) / 'logs' / 'weather_bq_loader'
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
         # BigQueryクライアントの初期化
         self.bq_client = bigquery.Client(project=project_id)
 
-        logger.info(f"WeatherBigQueryLoader初期化完了: {project_id}, JSONディレクトリ: {self.json_dir}")
+        # BQログテーブル設定
+        self.bq_log_table_id = f"{project_id}.prod_energy_data.process_execution_log"
+
+        print(f"WeatherBigQueryLoader初期化完了: {project_id}, JSONディレクトリ: {self.json_dir}")
     
     def get_unprocessed_json_files(self, data_type="forecast"):
         """
@@ -63,7 +65,7 @@ class WeatherBigQueryLoader:
         pattern = f"*_{data_type}.json"
         json_files = list(self.json_dir.glob(pattern))
 
-        logger.info(f"{data_type}タイプのJSONファイル {len(json_files)}個を検出")
+        print(f"{data_type}タイプのJSONファイル {len(json_files)}個を検出")
         return json_files
     
     def parse_json_to_rows(self, json_file_path):
@@ -105,7 +107,7 @@ class WeatherBigQueryLoader:
             }
             rows.append(row)
 
-        logger.info(f"JSONファイル解析完了: {json_file_path.name}, {len(rows)}行")
+        print(f"JSONファイル解析完了: {json_file_path.name}, {len(rows)}行")
         return rows
     
     def delete_duplicate_data(self, rows):
@@ -116,7 +118,7 @@ class WeatherBigQueryLoader:
             rows (list): インサート予定のデータ行
         """
         if not rows:
-            logger.info("削除対象データなし")
+            print("削除対象データなし")
             return
 
         # インサート予定データから日付範囲を取得
@@ -134,7 +136,7 @@ class WeatherBigQueryLoader:
         job = self.bq_client.query(delete_query)
         result = job.result()
 
-        logger.info(f"重複データ削除完了: {job.num_dml_affected_rows}行削除（期間: {min_date}～{max_date}）")
+        print(f"重複データ削除完了: {job.num_dml_affected_rows}行削除（期間: {min_date}～{max_date}）")
     
     def insert_weather_data(self, rows):
         """
@@ -147,7 +149,7 @@ class WeatherBigQueryLoader:
             int: インサート行数
         """
         if not rows:
-            logger.info("インサート対象データなし")
+            print("インサート対象データなし")
             return 0
 
         table_ref = f"{self.project_id}.{self.dataset_id}.{self.table_id}"
@@ -155,10 +157,10 @@ class WeatherBigQueryLoader:
 
         if errors:
             error_msg = f"BQインサートエラー: {errors}"
-            logger.error(error_msg)
+            print(error_msg)
             raise Exception(error_msg)
 
-        logger.info(f"気象データインサート完了: {len(rows)}行")
+        print(f"気象データインサート完了: {len(rows)}行")
         return len(rows)
     
     def move_processed_files(self, json_files):
@@ -177,12 +179,49 @@ class WeatherBigQueryLoader:
                 archive_path = archive_dir / json_file.name
                 json_file.rename(archive_path)
                 moved_count += 1
-                logger.info(f"処理済みファイル移動: {json_file.name} → archive/")
+                print(f"処理済みファイル移動: {json_file.name} → archive/")
             except Exception as e:
-                logger.error(f"ファイル移動失敗 {json_file.name}: {e}")
+                print(f"ファイル移動失敗 {json_file.name}: {e}")
 
-        logger.info(f"処理済みファイル {moved_count}個をarchive/に移動")
-    
+        print(f"処理済みファイル {moved_count}個をarchive/に移動")
+
+    def _write_log(self, log_data):
+        """
+        ログをローカルファイルとBigQueryに記録
+
+        Args:
+            log_data (dict): ログデータ
+        """
+        # ローカルファイルに記録
+        log_date = log_data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        log_file = self.log_dir / f"{log_date}_weather_bq_load_execution.jsonl"
+
+        try:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(log_data, ensure_ascii=False) + '\n')
+        except Exception as e:
+            print(f"ログファイル書き込み失敗: {e}")
+
+        # BigQueryに記録
+        try:
+            self.bq_client.insert_rows_json(self.bq_log_table_id, [log_data])
+        except Exception as e:
+            # BQエラーをローカルログにも記録
+            error_log = {
+                'timestamp': datetime.now().isoformat(),
+                'error_type': 'BQ_INSERT_FAILED',
+                'error_message': str(e),
+                'original_log_data': log_data
+            }
+            error_log_file = self.log_dir / f"{log_date}_bq_errors.jsonl"
+            try:
+                with open(error_log_file, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(error_log, ensure_ascii=False) + '\n')
+            except Exception as file_error:
+                print(f"エラーログファイル書き込み失敗: {file_error}")
+
+            print(f"BigQuery書き込み失敗（ファイルには保存済み・エラーログ記録済み）: {e}")
+
     def load_weather_data(self, data_type="forecast"):
         """
         気象データをBigQueryに投入するメイン処理
@@ -193,14 +232,43 @@ class WeatherBigQueryLoader:
         Returns:
             dict: 処理結果
         """
-        logger.info(f"気象データBQ投入開始: {data_type}")
+        # 実行ID・開始時刻記録
+        execution_id = str(uuid.uuid4())
+        started_at = datetime.now()
+        target_date_str = started_at.strftime('%Y-%m-%d')
+
+        print(f"気象データBQ投入開始: {data_type}, execution_id={execution_id}")
 
         try:
             # 1. 未処理JSONファイルを取得
             json_files = self.get_unprocessed_json_files(data_type)
 
             if not json_files:
-                logger.info("未処理ファイルなし")
+                print("未処理ファイルなし")
+
+                # 成功ログ記録（処理対象なし）
+                completed_at = datetime.now()
+                duration_seconds = int((completed_at - started_at).total_seconds())
+
+                log_data = {
+                    "execution_id": execution_id,
+                    "date": target_date_str,
+                    "process_type": "WEATHER_BQ_LOAD",
+                    "status": "SUCCESS",
+                    "error_message": None,
+                    "started_at": started_at.isoformat(),
+                    "completed_at": completed_at.isoformat(),
+                    "duration_seconds": duration_seconds,
+                    "records_processed": 0,
+                    "file_size_mb": None,
+                    "additional_info": {
+                        "data_type": data_type,
+                        "files_processed": 0,
+                        "message": "処理対象ファイルなし"
+                    }
+                }
+                self._write_log(log_data)
+
                 return {
                     'status': 'success',
                     'message': '処理対象ファイルなし',
@@ -223,7 +291,29 @@ class WeatherBigQueryLoader:
             # 5. 成功時のみファイル移動
             self.move_processed_files(json_files)
 
-            logger.info(f"気象データBQ投入完了: {len(json_files)}ファイル, {rows_inserted}行")
+            print(f"気象データBQ投入完了: {len(json_files)}ファイル, {rows_inserted}行")
+
+            # 成功ログ記録
+            completed_at = datetime.now()
+            duration_seconds = int((completed_at - started_at).total_seconds())
+
+            log_data = {
+                "execution_id": execution_id,
+                "date": target_date_str,
+                "process_type": "WEATHER_BQ_LOAD",
+                "status": "SUCCESS",
+                "error_message": None,
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "records_processed": rows_inserted,
+                "file_size_mb": None,
+                "additional_info": {
+                    "data_type": data_type,
+                    "files_processed": len(json_files)
+                }
+            }
+            self._write_log(log_data)
 
             return {
                 'status': 'success',
@@ -233,7 +323,28 @@ class WeatherBigQueryLoader:
             }
 
         except Exception as e:
-            logger.error(f"気象データBQ投入失敗: {e}")
+            print(f"気象データBQ投入失敗: {e}")
+
+            # 失敗ログ記録
+            completed_at = datetime.now()
+            duration_seconds = int((completed_at - started_at).total_seconds())
+
+            log_data = {
+                "execution_id": execution_id,
+                "date": target_date_str,
+                "process_type": "WEATHER_BQ_LOAD",
+                "status": "FAILED",
+                "error_message": str(e),
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "records_processed": None,
+                "file_size_mb": None,
+                "additional_info": {
+                    "data_type": data_type
+                }
+            }
+            self._write_log(log_data)
 
             return {
                 'status': 'failed',
@@ -260,9 +371,6 @@ def print_load_results(results):
 
 def main():
     """メイン関数"""
-    # ログ設定を初期化
-    setup_logging()
-
     parser = argparse.ArgumentParser(description='気象データBigQuery投入システム（JSON対応）')
     parser.add_argument('--data-type', type=str, default='forecast',
                        choices=['historical', 'forecast'],
