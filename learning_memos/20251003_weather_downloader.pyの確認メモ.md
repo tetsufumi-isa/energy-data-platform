@@ -16,7 +16,14 @@
             ・初期化することでダウンロード/ログのディレクトリ作成とBQクライアントのインスタンス作成
         ・download_daily_weather_dataを(args.date)で実行
             ・dateは必須ではないのでnoneを渡すこともある
-
+            ・実行結果はargs.date有り無しで以下の通り
+                ・args.date有り：args.date30日前～args.dateまでの過去データ取得
+                ・args.date無し
+                    ・実行10日前～3日前までの過去データ取得
+                    ・実行日含めた16日先までの予測データも取得
+                ・ダウンロード成功ならそのログ、失敗でもエラーログ生成しBQへインサート
+            ・ダウンロードエラーであればここまでエラーが流れてくるのでprintで表示
+                ・ダウンロードエラーのログ自体は呼び出し先の関数で作られている
 
     ・def __init__(self, download_dir=None):
         ・環境変数を基にダウンロードとログのディレクトリ作成
@@ -40,10 +47,10 @@
                         ・エラーはキャッチしてエラーログを作成し_write_log(log_data)を実行
                             ・log_dataとして受け取ってローカルとBQに保存。
                             　BQ接続エラーの際はそのログもローカルに残す。
-                    ・validate_response(historical_response)を実行
-                        ・HTTPセッションから実際に使うデータだけを抜き出し無いように欠損がないかチェックして返す
-                        ・エラーがあればフラグで確認できるのでraiseを実行
-                            ・ここでのraiseは外側のtryでキャッチしてエラーログを保存
+                ・validate_response(historical_response)を実行
+                    ・HTTPセッションから実際に使うデータだけを抜き出し無いように欠損がないかチェックして返す
+                    ・エラーがあればフラグで確認できるのでraiseを実行
+                        ・ここでのraiseは外側のtryでキャッチしてエラーログを保存
                 ・historical_filenameとしてjsonのファイルパスを作成
                 ・historical_path = self.save_json_response(historical_response, historical_filename)を実行
                     ・データを書き込みして保存してファイルパスを返す
@@ -51,24 +58,63 @@
                 ・resultsに過去データ書き込みの概要を記載
                     ・過去データの記載内容
                         ・ダウンロードデータのファイルパス
-                        ・ダウンロード期間
+                        ・ダウンロード期間：10日前から３日前まで
                         ・データ件数(time)を数える
                             ・validation_resultの中に入っている
                         ・save_json_responseで作成して受け取ったvalidation_result
-            
-            
-            
+            ・予測データ取得
+                ・get_forecast_data(session, forecast_days=16)を実行
+                    ・ダウンロードが成功したらbodyを含むセッションをforecast_responseで受け取る
+                    ・ダウンロード失敗の時はget_forecast_dataからエラーが流れてくる
+                        ・エラーはキャッチしてエラーログを作成し_write_log(log_data)を実行
+                            ・log_dataとして受け取ってローカルとBQに保存。
+                            　BQ接続エラーの際はそのログもローカルに残す。
+                ・validate_response(forecast_response)を実行            
+                    ・HTTPセッションから実際に使うデータだけを抜き出し無いように欠損がないかチェックして返す
+                    ・エラーがあればフラグで確認できるのでraiseを実行
+                        ・ここでのraiseは外側のtryでキャッチしてエラーログを保存           
+                ・forecast_filenameとしてjsonのファイルパスを作成
+                ・forecast_path = self.save_json_response(historical_response, historical_filename)を実行
+                    ・データを書き込みして保存してファイルパスを返す
+                    ・エラーであればraiseで呼び出しもとにエラーを返す
+                ・resultsに予測データ書き込みの概要を記載
+                    ・予測データの記載内容
+                        ・ダウンロードデータのファイルパス
+                        ・ダウンロード期間：当日含め１６日先まで
+                        ・データ件数(time)を数える
+                            ・validation_resultの中に入っている
+                        ・save_json_responseで作成して受け取ったvalidation_result 
+            ・成功ログ取得
+                ・ダウンロードにかかった時間を計測
+                ・過去と未来のダウンロード結果をlog_dataという辞書として作成
+                    ・log_dataはログ用のBQテーブルにあわせた設計なのでそのままインサート可能
+            ・_write_log(log_data)実行
+                ・ログとなる辞書データをlog_dataとして受け取ってローカルとBQに保存。
+    　          　BQ接続エラーの際はそのログもローカルに残す。
             ・sessionを開放
         ・基準日を受け取った場合
-            ・execution_id作成
-            ・基準日から30日前までを取得
-            ・HTTPセッションとヘッダー設定を定義
-            ・get_historical_data(session, historical_start, historical_end)を実行
-                ・ダウンロードが成功したらbodyを含むセッションをhistorical_responseで受け取る
-                ・ダウンロード失敗の時はget_historical_dataからエラーが流れてくる
+            ・基準日を受け取らなかった場合の過去データ取得と基本的には同じ動き
+                ・データ書き込み～ログ生成～セッションクローズまで行う
+                ・違いは期間
+                    ・基準日無しの過去データ取得：実行10日前から3日前までの日付を作成
+                    ・基準日ありの過去データ取得：基準日30日前～基準日まで
+    ★日付を受け取った場合は日付の30日前～受け取った日付までの過去データ取得。
+    　日付無しの場合は実行10日前～3日前までの過去データと実行日含めた16日先までの予測データを取得
+    　ダウンロード成功ならそのログ、失敗でもエラーログ生成しBQへインサート。
 
 
     ・def get_historical_data(self, session, start_date, end_date)
+        ・ダウンロードに必要な設定内容をparamsにまとめる
+        ・download_with_retryを(session, self.HISTORICAL_URL, params)で実行
+            ・ダウンロードが成功した際にはそれを返す
+                ・書き込みは行っていない
+            ・ダウンロード成功でないときはエラーが発生し、download_with_retryがエラーをキャッチせずに
+            　ここに戻ってくるが、ここでもキャッチせずに更に呼び出しもとに戻す
+    ★受け取った期間でダウンロードを実行し成功すれば返す、書き込みは行っていない。
+    　ダウンロードが成功していなければエラーを呼び出しもとに返す
+
+
+    ・def get_forecast_data(self, session, forecast_days=16):
         ・ダウンロードに必要な設定内容をparamsにまとめる
         ・download_with_retryを(session, self.HISTORICAL_URL, params)で実行
             ・ダウンロードが成功した際にはそれを返す
@@ -143,7 +189,6 @@
                     'issues': [],                   --問題が発生した際に内容を文章で記載
                     'stats': {'total_hours': 192}   --例：192時間分のデータ
                 }
-
     ★HTTPセッションから実際に使うデータだけを抜き出し無いように欠損がないかチェックして返す
     　
 
