@@ -72,6 +72,27 @@ class WeatherBigQueryLoader:
         precip = hourly_data.get('precipitation', [])
         weather_codes = hourly_data.get('weather_code', [])
 
+        # データ長検証
+        expected_length = len(times)
+        if expected_length == 0:
+            raise ValueError(f"timeデータが空です: {json_file_path}")
+
+        data_lengths = {
+            'time': len(times),
+            'temperature_2m': len(temps),
+            'relative_humidity_2m': len(humidity),
+            'precipitation': len(precip),
+            'weather_code': len(weather_codes)
+        }
+
+        mismatched = {key: length for key, length in data_lengths.items() if length != expected_length}
+        if mismatched:
+            error_msg = f"気象データの長さ不一致を検出: {json_file_path}\n"
+            error_msg += f"  期待される長さ: {expected_length}時間分\n"
+            for key, length in mismatched.items():
+                error_msg += f"  {key}: {length}時間分（不足: {expected_length - length}時間）\n"
+            raise ValueError(error_msg)
+
         rows = []
         for i, time_str in enumerate(times):
             # time: "2024-10-01T00:00" → date: "2024-10-01", hour: "00"
@@ -83,20 +104,20 @@ class WeatherBigQueryLoader:
                 'prefecture': '千葉県',
                 'date': date_str,
                 'hour': hour_str,
-                'temperature_2m': temps[i] if i < len(temps) else None,
-                'relative_humidity_2m': humidity[i] if i < len(humidity) else None,
-                'precipitation': precip[i] if i < len(precip) else None,
-                'weather_code': weather_codes[i] if i < len(weather_codes) else None,
+                'temperature_2m': temps[i],
+                'relative_humidity_2m': humidity[i],
+                'precipitation': precip[i],
+                'weather_code': weather_codes[i],
                 'created_at': datetime.now().isoformat()
             }
             rows.append(row)
 
-        print(f"JSONファイル解析完了: {json_file_path.name}, {len(rows)}行")
+        print(f"JSONファイル解析完了: {json_file_path.name}, {len(rows)}行（データ長検証OK）")
         return rows
     
     def delete_duplicate_data(self, rows):
         """
-        重複データを削除（インサート予定データと重複する既存データを削除）
+        既存データを削除（インサート予定データと同じ日付範囲の既存データを削除）
 
         Args:
             rows (list): インサート予定のデータ行
@@ -120,32 +141,7 @@ class WeatherBigQueryLoader:
         job = self.bq_client.query(delete_query)
         result = job.result()
 
-        print(f"重複データ削除完了: {job.num_dml_affected_rows}行削除（期間: {min_date}～{max_date}）")
-    
-    def insert_weather_data(self, rows):
-        """
-        気象データをBigQueryに投入
-
-        Args:
-            rows (list): BQインサート用のデータ行
-
-        Returns:
-            int: インサート行数
-        """
-        if not rows:
-            print("インサート対象データなし")
-            return 0
-
-        table_ref = f"{self.project_id}.{self.dataset_id}.{self.table_id}"
-        errors = self.bq_client.insert_rows_json(table_ref, rows)
-
-        if errors:
-            error_msg = f"BQインサートエラー: {errors}"
-            print(error_msg)
-            raise Exception(error_msg)
-
-        print(f"気象データインサート完了: {len(rows)}行")
-        return len(rows)
+        print(f"既存データ削除完了: {job.num_dml_affected_rows}行削除（期間: {min_date}～{max_date}）")
     
     def move_processed_files(self, json_files):
         """
@@ -248,7 +244,13 @@ class WeatherBigQueryLoader:
             self.delete_duplicate_data(rows)
 
             # 4. データ投入
-            rows_inserted = self.insert_weather_data(rows)
+            table_ref = f"{self.project_id}.{self.dataset_id}.{self.table_id}"
+            errors = self.bq_client.insert_rows_json(table_ref, rows)
+            if errors:
+                raise Exception(f"BQインサートエラー: {errors}")
+
+            rows_inserted = len(rows)
+            print(f"気象データインサート完了: {rows_inserted}行")
 
             # 5. 成功時のみファイル移動
             self.move_processed_files([json_file])
