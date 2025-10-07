@@ -56,6 +56,9 @@ class PowerBigQueryLoader:
         """
         CSVファイルを解析してBQインサート用の行データに変換
 
+        CSVは複数セクションに分かれており、'DATE,TIME,当日実績(万kW)'を含むヘッダー行の
+        次の行から24行分（24時間分）を処理する
+
         Args:
             csv_file_path (Path): CSVファイルパス
 
@@ -64,62 +67,74 @@ class PowerBigQueryLoader:
         """
         rows = []
 
+        # shift_jisでファイル全体を読み込み
         with open(csv_file_path, 'r', encoding='shift_jis') as f:
-            reader = csv.DictReader(f)
+            content = f.read()
 
-            for csv_row in reader:
-                # CSVの典型的な列名: DATE, TIME, 実績値（万kW）, 供給力（万kW）
-                # 列名のバリエーションに対応
-                date_str = csv_row.get('DATE') or csv_row.get('日付')
-                time_str = csv_row.get('TIME') or csv_row.get('時刻')
-                actual_power_str = csv_row.get('実績値（万kW）') or csv_row.get('実績値')
-                supply_capacity_str = csv_row.get('供給力（万kW）') or csv_row.get('供給力')
+        lines = content.split('\n')
 
-                if not all([date_str, time_str, actual_power_str]):
-                    # 必須項目が欠けている行はスキップ
-                    continue
+        # ヘッダー行（DATE,TIME,当日実績(万kW)）を見つける
+        header_line_index = -1
+        for i, line in enumerate(lines):
+            if 'DATE,TIME,当日実績(万kW)' in line:
+                header_line_index = i
+                break
 
-                # 日付・時刻パース
-                try:
-                    # DATE: YYYYMMDD形式想定
-                    if len(date_str) == 8:
-                        date_obj = datetime.strptime(date_str, '%Y%m%d')
-                    else:
-                        # YYYY-MM-DD形式の場合
-                        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        if header_line_index == -1:
+            print(f"ヘッダー行が見つかりません: {csv_file_path.name}")
+            return rows
 
-                    date_formatted = date_obj.strftime('%Y-%m-%d')
+        # ヘッダーの次行から24行処理
+        for i in range(header_line_index + 1, header_line_index + 25):
+            if i >= len(lines):
+                print(f"24時間分のデータが不足しています: {csv_file_path.name} (取得行数: {len(rows)})")
+                return []
 
-                    # TIME: HH:MM形式想定
-                    hour_str = time_str.split(':')[0].zfill(2)
+            line = lines[i].strip()
+            if not line:
+                print(f"空行が検出されました: {csv_file_path.name} 行{i}")
+                return []
 
-                except (ValueError, IndexError) as e:
-                    print(f"日付・時刻パースエラー: {date_str}, {time_str} - {e}")
-                    continue
+            parts = line.split(',')
+            if len(parts) < 6:
+                print(f"列数が不足しています: {csv_file_path.name} 行{i} (列数: {len(parts)})")
+                return []
 
-                # 実績値パース
-                try:
-                    actual_power = int(float(actual_power_str))
-                except (ValueError, TypeError):
-                    print(f"実績値パースエラー: {actual_power_str}")
-                    continue
+            try:
+                # 日付の抽出（"2023/1/1" → "2023-01-01"）
+                date_str = parts[0].strip()
+                formatted_date = datetime.strptime(date_str, '%Y/%m/%d').strftime('%Y-%m-%d')
 
-                # 供給力パース（オプション）
-                supply_capacity = None
-                if supply_capacity_str:
-                    try:
-                        supply_capacity = int(float(supply_capacity_str))
-                    except (ValueError, TypeError):
-                        pass
+                # 時刻の抽出（"13:00" → 13）
+                time_str = parts[1].strip()
+                hour = int(time_str.split(':')[0])
+
+                # データの抽出
+                actual_power = float(parts[2])
+                supply_capacity = float(parts[5])
 
                 row = {
-                    'date': date_formatted,
-                    'hour': hour_str,
+                    'date': formatted_date,
+                    'hour': hour,
                     'actual_power': actual_power,
                     'supply_capacity': supply_capacity,
                     'created_at': datetime.now().isoformat()
                 }
                 rows.append(row)
+
+            except (ValueError, IndexError) as e:
+                print(f"行パースエラー: {csv_file_path.name} 行{i} - {e}")
+                return []
+
+        # 24行取得できたか確認
+        if len(rows) != 24:
+            print(f"24時間分のデータが取得できませんでした: {csv_file_path.name} (取得行数: {len(rows)})")
+            return []
+
+        # 最後の行の時刻が23時であることを確認
+        if rows[-1]['hour'] != 23:
+            print(f"最終行の時刻が23時ではありません: {csv_file_path.name} (最終時刻: {rows[-1]['hour']})")
+            return []
 
         print(f"CSVファイル解析完了: {csv_file_path.name}, {len(rows)}行")
         return rows
@@ -150,45 +165,6 @@ class PowerBigQueryLoader:
         result = job.result()
 
         print(f"既存データ削除完了: {job.num_dml_affected_rows}行削除（期間: {min_date}～{max_date}）")
-
-    def move_processed_files(self, csv_files):
-        """
-        処理済みCSVファイルをアーカイブディレクトリに移動
-
-        Args:
-            csv_files (list): 処理済みCSVファイルのパスリスト
-        """
-        moved_count = 0
-        for csv_file in csv_files:
-            try:
-                archive_dir = csv_file.parent / 'archive'
-                archive_dir.mkdir(exist_ok=True)
-
-                archive_path = archive_dir / csv_file.name
-                csv_file.rename(archive_path)
-                moved_count += 1
-                print(f"処理済みファイル移動: {csv_file.name} → archive/")
-            except Exception as e:
-                print(f"ファイル移動失敗 {csv_file.name}: {e}")
-
-        print(f"処理済みファイル {moved_count}個をarchive/に移動")
-
-    def get_required_months(self, days=5):
-        """
-        指定日数分の日付から必要な月のセットを取得
-
-        Args:
-            days (int): 昨日から遡る日数（デフォルト: 5）
-
-        Returns:
-            set: 必要な月の文字列セット (例: {'202504', '202505'})
-        """
-        yesterday = datetime.today() - timedelta(days=1)
-        dates = [yesterday - timedelta(days=i) for i in range(days + 1)]
-        months = {date.strftime('%Y%m') for date in dates}
-
-        print(f"過去{days}日分に必要な月: {sorted(months)}")
-        return months
 
     def _write_log(self, log_data):
         """
@@ -247,7 +223,9 @@ class PowerBigQueryLoader:
 
         try:
             # 1. 該当する月を特定
-            months = self.get_required_months(days)
+            dates = [yesterday - timedelta(days=i) for i in range(days + 1)]
+            months = {date.strftime('%Y%m') for date in dates}
+            print(f"過去{days}日分に必要な月: {sorted(months)}")
 
             # 2. 各月のCSVファイルを取得
             all_csv_files = []
@@ -298,8 +276,10 @@ class PowerBigQueryLoader:
             rows_inserted = len(all_rows)
             print(f"電力データインサート完了: {rows_inserted}行")
 
-            # 6. 成功時のみファイル移動
-            self.move_processed_files(processed_files)
+            # 6. 成功時のみファイル削除
+            for csv_file in processed_files:
+                csv_file.unlink()
+                print(f"処理済みファイル削除: {csv_file.name}")
 
             print(f"電力データBQ投入完了: {len(processed_files)}ファイル, {rows_inserted}行")
 
