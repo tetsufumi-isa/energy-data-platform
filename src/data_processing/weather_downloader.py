@@ -224,11 +224,11 @@ class WeatherDownloader:
     
     def validate_response(self, response):
         """
-        APIレスポンスの基本検証（JSON形式チェック）
-        
+        APIレスポンスの基本検証（JSON形式チェック + データ長一致検証）
+
         Args:
             response (requests.Response): APIレスポンス
-            
+
         Returns:
             dict: 検証結果
         """
@@ -237,40 +237,64 @@ class WeatherDownloader:
             'issues': [],
             'stats': {}
         }
-        
+
         try:
             # JSON形式チェック（必要時のみ変換）
             data = response.json()
-            
+
             # 基本構造チェック
             if 'hourly' not in data:
                 validation_result['valid'] = False
                 validation_result['issues'].append("'hourly'データが見つかりません")
                 return validation_result
-            
+
             hourly_data = data['hourly']
-            
+
             # 気象変数存在チェック
             missing_vars = []
             for var in self.WEATHER_VARIABLES:
                 if var not in hourly_data:
                     missing_vars.append(var)
-            
+
             if missing_vars:
                 validation_result['valid'] = False
                 validation_result['issues'].append(f"欠けている変数: {missing_vars}")
-            
+                return validation_result
+
             # データポイント数カウント
-            if 'time' in hourly_data:
-                validation_result['stats']['total_hours'] = len(hourly_data['time'])
-            
+            if 'time' not in hourly_data:
+                validation_result['valid'] = False
+                validation_result['issues'].append("'time'データが見つかりません")
+                return validation_result
+
+            expected_length = len(hourly_data['time'])
+            validation_result['stats']['total_hours'] = expected_length
+
+            # データ長一致検証（全変数が同じ長さか）
+            data_lengths = {
+                'time': len(hourly_data['time'])
+            }
+
+            for var in self.WEATHER_VARIABLES:
+                data_lengths[var] = len(hourly_data[var])
+
+            mismatched = {key: length for key, length in data_lengths.items() if length != expected_length}
+
+            if mismatched:
+                validation_result['valid'] = False
+                error_msg = f"気象データの長さ不一致を検出:\n"
+                error_msg += f"  期待される長さ: {expected_length}時間分\n"
+                for key, length in mismatched.items():
+                    error_msg += f"  {key}: {length}時間分（差分: {length - expected_length}時間）\n"
+                validation_result['issues'].append(error_msg)
+
         except json.JSONDecodeError as e:
             validation_result['valid'] = False
             validation_result['issues'].append(f"JSONデコードエラー: {e}")
         except Exception as e:
             validation_result['valid'] = False
             validation_result['issues'].append(f"検証エラー: {e}")
-        
+
         return validation_result
     
     def download_daily_weather_data(self, target_date=None):
