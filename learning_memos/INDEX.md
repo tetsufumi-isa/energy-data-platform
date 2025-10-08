@@ -3,7 +3,7 @@
 ## 🎯 Claude推奨参照順（効率的理解用）
 
 ### **最優先参照**
-- **現在地・進捗**: `20251007_Phase11_power_bigquery_loader_コードレビュー完了・リファクタリング実施.md` ← 最新セッション成果
+- **現在地・進捗**: `20251008_Phase11_main_etl統合・設計方針決定.md` ← 最新セッション成果
 - **全体設計**: `各Phase概要.md` ← プロジェクト全体構造・Phase別詳細
 - **システム理解**: `システムフロー.md` ← 技術アーキテクチャ・データフロー
 
@@ -25,7 +25,8 @@
 ## 📊 ファイル分類
 
 ### **📈 進捗・成果記録**
-- `20251007_Phase11_power_bigquery_loader_コードレビュー完了・リファクタリング実施.md` ← **最新**
+- `20251008_Phase11_main_etl統合・設計方針決定.md` ← **最新**
+- `20251007_Phase11_power_bigquery_loader_コードレビュー完了・リファクタリング実施.md`
 - `20251007_Phase11_weather_downloader欠損値チェック・power_bigquery_loader実装完了.md`
 - `20251006_Phase11_weather_bigquery_loader_コードレビュー完了・リファクタリング実施.md`
 - `20251006_Phase11_weather_bigquery_loader_コードレビュー前半完了.md`
