@@ -360,6 +360,11 @@ def main():
     # 結果表示
     print_load_results(results)
 
+    # 失敗時はexit code 1を返す（Airflow対応）
+    if results['status'] == 'failed':
+        import sys
+        sys.exit(1)
+
     print("処理完了")
 
 

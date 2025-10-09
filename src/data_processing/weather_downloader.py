@@ -878,7 +878,8 @@ def main():
 
     except Exception as e:
         print(f"💥 ダウンロードエラー: {e}")
-        return
+        import sys
+        sys.exit(1)
 
     print("🏁 気象データダウンロード完了")
 

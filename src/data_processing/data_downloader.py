@@ -422,6 +422,10 @@ def main():
 
     print("🏁 ダウンロード完了")
 
+    # 全て失敗した場合はexit code 1を返す（Airflow対応）
+    if results['failed'] and not results['success']:
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
