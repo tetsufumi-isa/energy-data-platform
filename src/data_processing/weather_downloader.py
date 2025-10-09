@@ -1,10 +1,10 @@
 """
 気象データダウンローダー - Open-Meteo API統合（修正版）
 
-Phase 10: 日次自動予測システム用
+Phase 11: 柔軟な過去データ取得対応
 - Historical API: 過去データ取得（2日遅延考慮）
 - Forecast API: 16日間の予測データ取得
-- 基準日による取得ロジック分離
+- 期間指定・月指定による柔軟な過去データ取得
 
 実行方法:
     # 日次自動実行用（過去10日+予測16日）
@@ -12,6 +12,12 @@ Phase 10: 日次自動予測システム用
 
     # 過去データ分析用（指定日から30日前まで）
     python -m src.data_processing.weather_downloader --date 2025-08-01
+
+    # 期間指定取得
+    python -m src.data_processing.weather_downloader --start-date 2025-07-01 --end-date 2025-07-31
+
+    # 月指定取得（1日～月末）
+    python -m src.data_processing.weather_downloader --month 202507
 
     # ダウンロードディレクトリ指定
     python -m src.data_processing.weather_downloader --download-dir data/weather/raw/daily
@@ -539,6 +545,238 @@ class WeatherDownloader:
             finally:
                 session.close()
 
+    def download_historical_data(self, start_date, end_date):
+        """
+        期間指定での過去データ取得
+
+        Args:
+            start_date (str): 開始日 (YYYY-MM-DD)
+            end_date (str): 終了日 (YYYY-MM-DD)
+
+        Returns:
+            dict: ダウンロード結果
+        """
+        # 日付検証
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        except ValueError:
+            raise ValueError(f"日付形式が不正です。YYYY-MM-DD形式を使用してください。")
+
+        if start_dt > end_dt:
+            raise ValueError(f"開始日が終了日より後になっています: {start_date} > {end_date}")
+
+        execution_id = str(uuid.uuid4())
+        started_at = datetime.now()
+        target_date_str = start_date
+
+        print(f"期間指定取得モード: {start_date} ～ {end_date}")
+
+        # ファイル名用（開始日の年月を使用）
+        year = start_dt.year
+        month = start_dt.strftime('%m')
+
+        # HTTPセッション作成・ヘッダー設定
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'energy-env-weather-downloader/1.0',
+            'Accept': 'application/json'
+        })
+        results = {'historical': [], 'forecast': []}
+
+        try:
+            # 過去データ取得
+            historical_response = self.get_historical_data(session, start_date, end_date)
+
+            # レスポンス検証
+            validation = self.validate_response(historical_response)
+            if not validation['valid']:
+                print(f"過去データ検証問題: {validation['issues']}")
+                raise ValueError(f"過去データ検証失敗: {validation['issues']}")
+
+            # ファイル名: chiba_2025_07_historical_range.json
+            historical_filename = f"chiba_{year}_{month}_historical_range.json"
+            historical_path = self.save_json_response(historical_response, historical_filename)
+
+            results['historical'].append({
+                'file': historical_path,
+                'period': f"{start_date} to {end_date}",
+                'data_points': validation['stats'].get('total_hours', 0) if validation['valid'] else 0,
+                'validation': validation
+            })
+
+            # 成功ログ記録
+            completed_at = datetime.now()
+            duration_seconds = int((completed_at - started_at).total_seconds())
+            total_data_points = sum([item['data_points'] for item in results['historical']])
+
+            log_data = {
+                "execution_id": execution_id,
+                "date": target_date_str,
+                "process_type": "WEATHER_API",
+                "status": "SUCCESS",
+                "error_message": None,
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "records_processed": total_data_points,
+                "file_size_mb": None,
+                "additional_info": {
+                    "mode": "historical_range",
+                    "historical_period": f"{start_date} to {end_date}",
+                    "historical_files": len(results['historical'])
+                }
+            }
+
+            self._write_log(log_data)
+            print(f"期間指定取得完了: {start_date} ～ {end_date}")
+            return results
+
+        except Exception as e:
+            # エラーログ記録
+            completed_at = datetime.now()
+            duration_seconds = int((completed_at - started_at).total_seconds())
+
+            log_data = {
+                "execution_id": execution_id,
+                "date": target_date_str,
+                "process_type": "WEATHER_API",
+                "status": "FAILED",
+                "error_message": str(e),
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "records_processed": None,
+                "file_size_mb": None,
+                "additional_info": {
+                    "mode": "historical_range",
+                    "historical_period": f"{start_date} to {end_date}"
+                }
+            }
+
+            self._write_log(log_data)
+            print(f"期間指定取得失敗: {e}")
+            raise
+        finally:
+            session.close()
+
+    def download_for_month(self, yyyymm):
+        """
+        月指定での過去データ取得（1日～月末）
+
+        Args:
+            yyyymm (str): 対象月 (YYYYMM形式、例: 202507)
+
+        Returns:
+            dict: ダウンロード結果
+        """
+        # 月形式検証
+        try:
+            year = int(yyyymm[:4])
+            month = int(yyyymm[4:6])
+            if len(yyyymm) != 6 or month < 1 or month > 12:
+                raise ValueError()
+        except (ValueError, IndexError):
+            raise ValueError(f"月形式が不正です。YYYYMM形式を使用してください（例: 202507）")
+
+        # 月初と月末を計算
+        from calendar import monthrange
+        start_date = f"{year:04d}-{month:02d}-01"
+        last_day = monthrange(year, month)[1]
+        end_date = f"{year:04d}-{month:02d}-{last_day:02d}"
+
+        execution_id = str(uuid.uuid4())
+        started_at = datetime.now()
+        target_date_str = start_date
+
+        print(f"月指定取得モード: {yyyymm} ({start_date} ～ {end_date})")
+
+        # HTTPセッション作成・ヘッダー設定
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'energy-env-weather-downloader/1.0',
+            'Accept': 'application/json'
+        })
+        results = {'historical': [], 'forecast': []}
+
+        try:
+            # 過去データ取得
+            historical_response = self.get_historical_data(session, start_date, end_date)
+
+            # レスポンス検証
+            validation = self.validate_response(historical_response)
+            if not validation['valid']:
+                print(f"過去データ検証問題: {validation['issues']}")
+                raise ValueError(f"過去データ検証失敗: {validation['issues']}")
+
+            # ファイル名: chiba_2025_07_historical_month.json
+            historical_filename = f"chiba_{year}_{month:02d}_historical_month.json"
+            historical_path = self.save_json_response(historical_response, historical_filename)
+
+            results['historical'].append({
+                'file': historical_path,
+                'period': f"{start_date} to {end_date}",
+                'data_points': validation['stats'].get('total_hours', 0) if validation['valid'] else 0,
+                'validation': validation
+            })
+
+            # 成功ログ記録
+            completed_at = datetime.now()
+            duration_seconds = int((completed_at - started_at).total_seconds())
+            total_data_points = sum([item['data_points'] for item in results['historical']])
+
+            log_data = {
+                "execution_id": execution_id,
+                "date": target_date_str,
+                "process_type": "WEATHER_API",
+                "status": "SUCCESS",
+                "error_message": None,
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "records_processed": total_data_points,
+                "file_size_mb": None,
+                "additional_info": {
+                    "mode": "historical_month",
+                    "target_month": yyyymm,
+                    "historical_period": f"{start_date} to {end_date}",
+                    "historical_files": len(results['historical'])
+                }
+            }
+
+            self._write_log(log_data)
+            print(f"月指定取得完了: {yyyymm}")
+            return results
+
+        except Exception as e:
+            # エラーログ記録
+            completed_at = datetime.now()
+            duration_seconds = int((completed_at - started_at).total_seconds())
+
+            log_data = {
+                "execution_id": execution_id,
+                "date": target_date_str,
+                "process_type": "WEATHER_API",
+                "status": "FAILED",
+                "error_message": str(e),
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "records_processed": None,
+                "file_size_mb": None,
+                "additional_info": {
+                    "mode": "historical_month",
+                    "target_month": yyyymm,
+                    "historical_period": f"{start_date} to {end_date}"
+                }
+            }
+
+            self._write_log(log_data)
+            print(f"月指定取得失敗: {e}")
+            raise
+        finally:
+            session.close()
+
 
 def print_results(results):
     """処理結果を表示"""
@@ -572,42 +810,76 @@ def print_results(results):
 
 def main():
     """メイン関数"""
-    parser = argparse.ArgumentParser(description='Open-Meteo気象データダウンローダー（修正版）')
+    parser = argparse.ArgumentParser(description='Open-Meteo気象データダウンローダー（Phase 11対応版）')
     parser.add_argument('--date', type=str,
                        help='基準日 (YYYY-MM-DD形式) 指定なし:日次自動実行用、指定あり:過去データ分析用')
+    parser.add_argument('--start-date', type=str,
+                       help='期間指定の開始日 (YYYY-MM-DD形式、--end-dateと併用)')
+    parser.add_argument('--end-date', type=str,
+                       help='期間指定の終了日 (YYYY-MM-DD形式、--start-dateと併用)')
+    parser.add_argument('--month', type=str,
+                       help='月指定 (YYYYMM形式、例: 202507)')
     parser.add_argument('--download-dir', type=str,
                        help='ダウンロードディレクトリパス')
-    
+
     args = parser.parse_args()
-    
+
+    # 引数の排他チェック
+    modes = sum([
+        args.date is not None,
+        (args.start_date is not None or args.end_date is not None),
+        args.month is not None
+    ])
+
+    if modes > 1:
+        print("エラー: --date, --start-date/--end-date, --month は同時に指定できません")
+        return
+
+    if (args.start_date is None) != (args.end_date is None):
+        print("エラー: --start-date と --end-date は両方指定する必要があります")
+        return
+
     print("🚀 Open-Meteo気象データダウンロード開始")
     print(f"📍 対象地点: 千葉県 (lat: {WeatherDownloader.CHIBA_COORDS['latitude']}, "
           f"lon: {WeatherDownloader.CHIBA_COORDS['longitude']})")
-    
-    if args.date:
-        print(f"📅 基準日指定: {args.date} (過去データ分析用)")
-        print(f"📊 取得範囲: {args.date}から30日前までの過去データ")
-    else:
-        today = datetime.now()
-        historical_start = (today - timedelta(days=10)).strftime('%Y-%m-%d')
-        historical_end = (today - timedelta(days=3)).strftime('%Y-%m-%d')
-        print(f"📅 日次自動実行モード")
-        print(f"📊 取得範囲: 過去データ({historical_start}〜{historical_end}) + 予測データ(16日間)")
-    
+
     try:
         # WeatherDownloader初期化
         downloader = WeatherDownloader(args.download_dir)
-        
-        # 気象データダウンロード実行
-        results = downloader.download_daily_weather_data(args.date)
-        
+
+        # モードに応じた実行
+        if args.month:
+            # 月指定モード
+            print(f"📅 月指定モード: {args.month}")
+            results = downloader.download_for_month(args.month)
+
+        elif args.start_date and args.end_date:
+            # 期間指定モード
+            print(f"📅 期間指定モード: {args.start_date} ～ {args.end_date}")
+            results = downloader.download_historical_data(args.start_date, args.end_date)
+
+        elif args.date:
+            # 過去データ分析モード（指定日から30日前まで）
+            print(f"📅 基準日指定: {args.date} (過去データ分析用)")
+            print(f"📊 取得範囲: {args.date}から30日前までの過去データ")
+            results = downloader.download_daily_weather_data(args.date)
+
+        else:
+            # 日次自動実行モード
+            today = datetime.now()
+            historical_start = (today - timedelta(days=10)).strftime('%Y-%m-%d')
+            historical_end = (today - timedelta(days=3)).strftime('%Y-%m-%d')
+            print(f"📅 日次自動実行モード")
+            print(f"📊 取得範囲: 過去データ({historical_start}〜{historical_end}) + 予測データ(16日間)")
+            results = downloader.download_daily_weather_data()
+
         # 結果表示
         print_results(results)
-        
+
     except Exception as e:
         print(f"💥 ダウンロードエラー: {e}")
         return
-    
+
     print("🏁 気象データダウンロード完了")
 
 
