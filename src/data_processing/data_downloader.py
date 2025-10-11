@@ -68,7 +68,9 @@ class PowerDataDownloader:
 
         # BigQueryに記録
         try:
-            self.bq_client.insert_rows_json(self.bq_table_id, [log_data])
+            errors = self.bq_client.insert_rows_json(self.bq_table_id, [log_data])
+            if errors:
+                raise Exception(f"BigQuery insert errors: {errors}")
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
@@ -189,7 +191,7 @@ class PowerDataDownloader:
                 "duration_seconds": duration_seconds,
                 "records_processed": None,
                 "file_size_mb": file_size_mb,
-                "additional_info": {"month": yyyymm, "url": url}
+                "additional_info": json.dumps({"month": yyyymm, "url": url})
             }
 
             self._write_log(log_data)
@@ -213,7 +215,7 @@ class PowerDataDownloader:
                     "duration_seconds": duration_seconds,
                     "records_processed": None,
                     "file_size_mb": None,
-                    "additional_info": {"month": yyyymm, "url": url, "http_status": 404}
+                    "additional_info": json.dumps({"month": yyyymm, "url": url, "http_status": 404})
                 }
 
                 self._write_log(log_data)
@@ -235,7 +237,7 @@ class PowerDataDownloader:
                     "duration_seconds": duration_seconds,
                     "records_processed": None,
                     "file_size_mb": None,
-                    "additional_info": {"month": yyyymm, "url": url, "http_status": e.response.status_code}
+                    "additional_info": json.dumps({"month": yyyymm, "url": url, "http_status": e.response.status_code})
                 }
 
                 self._write_log(log_data)
@@ -257,7 +259,7 @@ class PowerDataDownloader:
                 "duration_seconds": duration_seconds,
                 "records_processed": None,
                 "file_size_mb": None,
-                "additional_info": {"month": yyyymm, "url": url}
+                "additional_info": json.dumps({"month": yyyymm, "url": url})
             }
 
             self._write_log(log_data)
@@ -356,7 +358,7 @@ def main():
     energy_env_path = os.getenv('ENERGY_ENV_PATH')
     if energy_env_path is None:
         default_base_dir = 'data/raw'  # 環境変数が設定されていない場合のフォールバック
-        print("⚠️  警告: ENERGY_ENV_PATH環境変数が設定されていません。相対パスを使用します。")
+        print("警告: ENERGY_ENV_PATH環境変数が設定されていません。相対パスを使用します。")
     else:
         default_base_dir = os.path.join(energy_env_path, 'data', 'raw')
     
@@ -380,47 +382,47 @@ def main():
     ]
     
     if sum(specified_args) > 1:
-        print("❌ エラー: --days, --month, --date は同時に指定できません")
+        print("エラー: --days, --month, --date は同時に指定できません")
         print("   1つの実行で1つの処理のみ可能です")
         return
-    
+
     # ダウンローダー初期化
     try:
         downloader = PowerDataDownloader(args.base_dir)
     except ValueError as e:
-        print(f"❌ エラー: {e}")
+        print(f"エラー: {e}")
         print("   ENERGY_ENV_PATH環境変数を設定してください")
         return
-    
-    print("🚀 東京電力でんき予報データダウンロード開始")
-    print(f"📂 保存先: {downloader.base_dir}")
+
+    print("東京電力でんき予報データダウンロード開始")
+    print(f"保存先: {downloader.base_dir}")
     
     # 実行モード判定とダウンロード実行
     if args.month:
-        print(f"📅 指定月モード: {args.month}")
+        print(f"指定月モード: {args.month}")
         results = downloader.download_for_month(args.month)
     elif args.date:
-        print(f"📅 特定日モード: {args.date}")
+        print(f"特定日モード: {args.date}")
         results = downloader.download_for_date(args.date)
     elif args.days:
-        print(f"📅 日数指定モード: 過去{args.days}日分")
+        print(f"日数指定モード: 過去{args.days}日分")
         results = downloader.download_for_days(args.days)
     else:
-        print("❌ エラー: 実行モードが特定できません")
+        print("エラー: 実行モードが特定できません")
         print("   --days, --month, --date のいずれかを指定してください")
         return
-    
+
     # 結果表示
     if results['success']:
-        print(f"✅ 成功: {', '.join(results['success'])}")
+        print(f"成功: {', '.join(results['success'])}")
 
     if results['failed']:
-        print(f"❌ 失敗: {', '.join(results['failed'])}")
+        print(f"失敗: {', '.join(results['failed'])}")
 
     if not results['success'] and not results['failed']:
-        print("📝 処理対象がありませんでした")
+        print("処理対象がありませんでした")
 
-    print("🏁 ダウンロード完了")
+    print("ダウンロード完了")
 
     # 全て失敗した場合はexit code 1を返す（Airflow対応）
     if results['failed'] and not results['success']:

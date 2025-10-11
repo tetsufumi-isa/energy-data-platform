@@ -185,7 +185,9 @@ class PowerBigQueryLoader:
 
         # BigQueryに記録
         try:
-            self.bq_client.insert_rows_json(self.bq_log_table_id, [log_data])
+            errors = self.bq_client.insert_rows_json(self.bq_log_table_id, [log_data])
+            if errors:
+                raise Exception(f"BigQuery insert errors: {errors}")
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
@@ -298,11 +300,11 @@ class PowerBigQueryLoader:
                 "duration_seconds": duration_seconds,
                 "records_processed": rows_inserted,
                 "file_size_mb": None,
-                "additional_info": {
+                "additional_info": json.dumps({
                     "days": days,
                     "months_processed": sorted(list(months)),
                     "files_processed": len(processed_files)
-                }
+                })
             }
             self._write_log(log_data)
 
@@ -331,9 +333,9 @@ class PowerBigQueryLoader:
                 "duration_seconds": duration_seconds,
                 "records_processed": None,
                 "file_size_mb": None,
-                "additional_info": {
+                "additional_info": json.dumps({
                     "days": days
-                }
+                })
             }
             self._write_log(log_data)
 

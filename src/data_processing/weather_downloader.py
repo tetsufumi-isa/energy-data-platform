@@ -101,7 +101,9 @@ class WeatherDownloader:
 
         # BigQueryに記録
         try:
-            self.bq_client.insert_rows_json(self.bq_table_id, [log_data])
+            errors = self.bq_client.insert_rows_json(self.bq_table_id, [log_data])
+            if errors:
+                raise Exception(f"BigQuery insert errors: {errors}")
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
@@ -399,13 +401,13 @@ class WeatherDownloader:
                     "duration_seconds": duration_seconds,
                     "records_processed": total_data_points,
                     "file_size_mb": None,
-                    "additional_info": {
+                    "additional_info": json.dumps({
                         "mode": "daily_automatic",
                         "historical_period": f"{historical_start} to {historical_end}",
                         "forecast_days": 16,
                         "historical_files": len(results['historical']),
                         "forecast_files": len(results['forecast'])
-                    }
+                    })
                 }
 
                 self._write_log(log_data)
@@ -428,11 +430,11 @@ class WeatherDownloader:
                     "duration_seconds": duration_seconds,
                     "records_processed": None,
                     "file_size_mb": None,
-                    "additional_info": {
+                    "additional_info": json.dumps({
                         "mode": "daily_automatic",
                         "historical_period": f"{historical_start} to {historical_end}",
                         "forecast_days": 16
-                    }
+                    })
                 }
 
                 self._write_log(log_data)
@@ -506,11 +508,11 @@ class WeatherDownloader:
                     "duration_seconds": duration_seconds,
                     "records_processed": total_data_points,
                     "file_size_mb": None,
-                    "additional_info": {
+                    "additional_info": json.dumps({
                         "mode": "historical_analysis",
                         "historical_period": f"{historical_start} to {historical_end}",
                         "historical_files": len(results['historical'])
-                    }
+                    })
                 }
 
                 self._write_log(log_data)
@@ -533,10 +535,10 @@ class WeatherDownloader:
                     "duration_seconds": duration_seconds,
                     "records_processed": None,
                     "file_size_mb": None,
-                    "additional_info": {
+                    "additional_info": json.dumps({
                         "mode": "historical_analysis",
                         "historical_period": f"{historical_start} to {historical_end}"
-                    }
+                    })
                 }
 
                 self._write_log(log_data)
@@ -621,11 +623,11 @@ class WeatherDownloader:
                 "duration_seconds": duration_seconds,
                 "records_processed": total_data_points,
                 "file_size_mb": None,
-                "additional_info": {
+                "additional_info": json.dumps({
                     "mode": "historical_range",
                     "historical_period": f"{start_date} to {end_date}",
                     "historical_files": len(results['historical'])
-                }
+                })
             }
 
             self._write_log(log_data)
@@ -648,10 +650,10 @@ class WeatherDownloader:
                 "duration_seconds": duration_seconds,
                 "records_processed": None,
                 "file_size_mb": None,
-                "additional_info": {
+                "additional_info": json.dumps({
                     "mode": "historical_range",
                     "historical_period": f"{start_date} to {end_date}"
-                }
+                })
             }
 
             self._write_log(log_data)
@@ -736,12 +738,12 @@ class WeatherDownloader:
                 "duration_seconds": duration_seconds,
                 "records_processed": total_data_points,
                 "file_size_mb": None,
-                "additional_info": {
+                "additional_info": json.dumps({
                     "mode": "historical_month",
                     "target_month": yyyymm,
                     "historical_period": f"{start_date} to {end_date}",
                     "historical_files": len(results['historical'])
-                }
+                })
             }
 
             self._write_log(log_data)
@@ -764,11 +766,11 @@ class WeatherDownloader:
                 "duration_seconds": duration_seconds,
                 "records_processed": None,
                 "file_size_mb": None,
-                "additional_info": {
+                "additional_info": json.dumps({
                     "mode": "historical_month",
                     "target_month": yyyymm,
                     "historical_period": f"{start_date} to {end_date}"
-                }
+                })
             }
 
             self._write_log(log_data)
@@ -781,30 +783,30 @@ class WeatherDownloader:
 def print_results(results):
     """処理結果を表示"""
     print(f"\n{'='*60}")
-    print("🌤️ 気象データダウンロード結果")
+    print("気象データダウンロード結果")
     print('='*60)
-    
+
     # Historical データ結果
     if results['historical']:
-        print(f"\n✅ 過去データ: {len(results['historical'])}件")
+        print(f"\n過去データ: {len(results['historical'])}件")
         for item in results['historical']:
-            print(f"  📁 {Path(item['file']).name}")
+            print(f"  {Path(item['file']).name}")
             print(f"     期間: {item['period']}")
             print(f"     データポイント: {item['data_points']}時間")
             if not item['validation']['valid']:
-                print(f"     ⚠️ 検証問題: {item['validation']['issues']}")
-    
+                print(f"     検証問題: {item['validation']['issues']}")
+
     # Forecast データ結果
     if results['forecast']:
-        print(f"\n✅ 予測データ: {len(results['forecast'])}件")
+        print(f"\n予測データ: {len(results['forecast'])}件")
         for item in results['forecast']:
-            print(f"  📁 {Path(item['file']).name}")
+            print(f"  {Path(item['file']).name}")
             print(f"     予測期間: {item['forecast_days']}日間")
             print(f"     データポイント: {item['data_points']}時間")
             if not item['validation']['valid']:
-                print(f"     ⚠️ 検証問題: {item['validation']['issues']}")
-    
-    print(f"\n📈 総合結果: 過去{len(results['historical'])}件 / 予測{len(results['forecast'])}件")
+                print(f"     検証問題: {item['validation']['issues']}")
+
+    print(f"\n総合結果: 過去{len(results['historical'])}件 / 予測{len(results['forecast'])}件")
     print('='*60)
 
 
@@ -839,8 +841,8 @@ def main():
         print("エラー: --start-date と --end-date は両方指定する必要があります")
         return
 
-    print("🚀 Open-Meteo気象データダウンロード開始")
-    print(f"📍 対象地点: 千葉県 (lat: {WeatherDownloader.CHIBA_COORDS['latitude']}, "
+    print("Open-Meteo気象データダウンロード開始")
+    print(f"対象地点: 千葉県 (lat: {WeatherDownloader.CHIBA_COORDS['latitude']}, "
           f"lon: {WeatherDownloader.CHIBA_COORDS['longitude']})")
 
     try:
@@ -850,18 +852,18 @@ def main():
         # モードに応じた実行
         if args.month:
             # 月指定モード
-            print(f"📅 月指定モード: {args.month}")
+            print(f"月指定モード: {args.month}")
             results = downloader.download_for_month(args.month)
 
         elif args.start_date and args.end_date:
             # 期間指定モード
-            print(f"📅 期間指定モード: {args.start_date} ～ {args.end_date}")
+            print(f"期間指定モード: {args.start_date} ～ {args.end_date}")
             results = downloader.download_historical_data(args.start_date, args.end_date)
 
         elif args.date:
             # 過去データ分析モード（指定日から30日前まで）
-            print(f"📅 基準日指定: {args.date} (過去データ分析用)")
-            print(f"📊 取得範囲: {args.date}から30日前までの過去データ")
+            print(f"基準日指定: {args.date} (過去データ分析用)")
+            print(f"取得範囲: {args.date}から30日前までの過去データ")
             results = downloader.download_daily_weather_data(args.date)
 
         else:
@@ -869,19 +871,19 @@ def main():
             today = datetime.now()
             historical_start = (today - timedelta(days=10)).strftime('%Y-%m-%d')
             historical_end = (today - timedelta(days=3)).strftime('%Y-%m-%d')
-            print(f"📅 日次自動実行モード")
-            print(f"📊 取得範囲: 過去データ({historical_start}〜{historical_end}) + 予測データ(16日間)")
+            print(f"日次自動実行モード")
+            print(f"取得範囲: 過去データ({historical_start}〜{historical_end}) + 予測データ(16日間)")
             results = downloader.download_daily_weather_data()
 
         # 結果表示
         print_results(results)
 
     except Exception as e:
-        print(f"💥 ダウンロードエラー: {e}")
+        print(f"ダウンロードエラー: {e}")
         import sys
         sys.exit(1)
 
-    print("🏁 気象データダウンロード完了")
+    print("気象データダウンロード完了")
 
 
 if __name__ == "__main__":

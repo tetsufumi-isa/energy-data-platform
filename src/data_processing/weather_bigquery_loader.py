@@ -184,7 +184,9 @@ class WeatherBigQueryLoader:
 
         # BigQueryに記録
         try:
-            self.bq_client.insert_rows_json(self.bq_log_table_id, [log_data])
+            errors = self.bq_client.insert_rows_json(self.bq_log_table_id, [log_data])
+            if errors:
+                raise Exception(f"BigQuery insert errors: {errors}")
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
@@ -202,13 +204,14 @@ class WeatherBigQueryLoader:
 
             print(f"BigQuery書き込み失敗（ファイルには保存済み・エラーログ記録済み）: {e}")
 
-    def load_weather_data(self, data_type, target_date=None):
+    def load_weather_data(self, data_type, target_date=None, file_name=None):
         """
         気象データをBigQueryに投入するメイン処理
 
         Args:
             data_type (str): "historical" | "forecast" ※必須
             target_date (str): 対象日付 (YYYY-MM-DD形式、Noneの場合は今日)
+            file_name (str): ファイル名を直接指定（指定時はtarget_dateを無視）
 
         Returns:
             dict: 処理結果
@@ -222,14 +225,22 @@ class WeatherBigQueryLoader:
 
         try:
             # 1. 対象JSONファイルパス生成
-            if target_date is None:
-                dt = datetime.now()
+            if file_name:
+                # ファイル名が直接指定された場合
+                filename = file_name
+                print(f"ファイル名指定モード: {filename}")
             else:
-                dt = datetime.strptime(target_date, '%Y-%m-%d')
+                # 従来の日付ベース命名規則
+                if target_date is None:
+                    dt = datetime.now()
+                else:
+                    dt = datetime.strptime(target_date, '%Y-%m-%d')
 
-            year = dt.year
-            date_part = dt.strftime('%m%d')
-            filename = f"chiba_{year}_{date_part}_{data_type}.json"
+                year = dt.year
+                date_part = dt.strftime('%m%d')
+                filename = f"chiba_{year}_{date_part}_{data_type}.json"
+                print(f"日付ベースファイル名: {filename}")
+
             json_file = self.raw_data_dir / filename
 
             print(f"対象ファイル: {json_file}")
@@ -272,10 +283,10 @@ class WeatherBigQueryLoader:
                 "duration_seconds": duration_seconds,
                 "records_processed": rows_inserted,
                 "file_size_mb": None,
-                "additional_info": {
+                "additional_info": json.dumps({
                     "data_type": data_type,
                     "files_processed": 1
-                }
+                })
             }
             self._write_log(log_data)
 
@@ -304,9 +315,9 @@ class WeatherBigQueryLoader:
                 "duration_seconds": duration_seconds,
                 "records_processed": None,
                 "file_size_mb": None,
-                "additional_info": {
+                "additional_info": json.dumps({
                     "data_type": data_type
-                }
+                })
             }
             self._write_log(log_data)
 
@@ -345,17 +356,22 @@ def main():
                        help='生データ(JSON)格納ディレクトリ')
     parser.add_argument('--target-date', type=str, default=None,
                        help='対象日付 (YYYY-MM-DD形式、指定なしの場合は今日)')
+    parser.add_argument('--file-name', type=str, default=None,
+                       help='ファイル名を直接指定（例: chiba_2025_07_historical_range.json）')
 
     args = parser.parse_args()
 
     print("気象データBigQuery投入システム開始")
     print(f"データタイプ: {args.data_type}")
     print(f"プロジェクト: {args.project_id}")
-    print(f"対象日: {args.target_date if args.target_date else '今日'}")
+    if args.file_name:
+        print(f"ファイル名: {args.file_name}")
+    else:
+        print(f"対象日: {args.target_date if args.target_date else '今日'}")
 
     # 投入処理実行
     loader = WeatherBigQueryLoader(args.project_id, args.raw_data_dir)
-    results = loader.load_weather_data(args.data_type, args.target_date)
+    results = loader.load_weather_data(args.data_type, args.target_date, args.file_name)
 
     # 結果表示
     print_load_results(results)
