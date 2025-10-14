@@ -114,17 +114,8 @@ def log_and_save_to_bq(client, process_status, log_level='INFO'):
     Returns:
         bool: BQ保存成功=True, 失敗=False
     """
-    # 1. ファイルへのログ出力（JSON形式）
-    log_message = f"{process_status.get('process_type', 'UNKNOWN')}: {process_status.get('status', 'UNKNOWN')}"
-    if log_level == 'INFO':
-        logger.info(log_message, extra={'process_status': process_status})
-    elif log_level == 'ERROR':
-        logger.error(log_message, extra={'process_status': process_status})
-
-    # 2. BigQueryへのインサート（同じデータ）
-    table_id = 'energy-env.prod_energy_data.process_execution_log'
-
     # BQ用にデータ整形（日付型をISO形式文字列に変換）
+    table_id = 'energy-env.prod_energy_data.process_execution_log'
     bq_data = process_status.copy()
 
     # started_at変換（datetime → ISO形式文字列）
@@ -147,6 +138,13 @@ def log_and_save_to_bq(client, process_status, log_level='INFO'):
 
     # client.insert_rows_json()は成功は空で失敗時のみエラー情報の入ったリストを返す
     errors = client.insert_rows_json(table_id, [bq_data])
+
+    # ファイルへのログ出力（変換済みbq_dataを使用してJSON serialization問題を回避）
+    log_message = f"{process_status.get('process_type', 'UNKNOWN')}: {process_status.get('status', 'UNKNOWN')}"
+    if log_level == 'INFO':
+        logger.info(log_message, extra={'process_status': bq_data})
+    elif log_level == 'ERROR':
+        logger.error(log_message, extra={'process_status': bq_data})
 
     if errors:
         logger.error(f"BQインサートエラー: {errors}")
@@ -265,13 +263,17 @@ try:
         SELECT *
         FROM `energy-env.prod_energy_data.weather_data`
         WHERE date BETWEEN '{today}' AND '{end_date_str}'
-            AND prefecture = 'chiba'
+            AND prefecture = '千葉県'
     ) w
     LEFT JOIN `energy-env.prod_energy_data.calendar_data` c
         ON w.date = c.date
     ORDER BY w.date, w.hour
     """
     future_features = client.query(query_future_data).to_dataframe()
+
+    # hour列を数値型に変換（BQから文字列で取得されるため）
+    future_features['hour'] = pd.to_numeric(future_features['hour'])
+
     future_features['datetime'] = pd.to_datetime(
         future_features['date'].astype(str) + ' ' +
         future_features['hour'].astype(str).str.zfill(2) + ':00:00'
@@ -420,7 +422,7 @@ def prepare_features(target_datetime, predictions):
                 lag_date = lag_datetime.date()
 
                 # 予測値優先（未来の営業日）
-                if lag_datetime in predictions and lag_date in business_days_future.index:
+                if lag_datetime in predictions and lag_date in business_days_future:
                     feature_values.append(predictions[lag_datetime])
                     found = True
                     break
@@ -582,14 +584,15 @@ table_id = 'prediction_results'
 table_ref = f"{client.project}.{dataset_id}.{table_id}"
 
 # 予測結果をBigQuery用に変換
+now = pd.Timestamp.now()  # pandas Timestamp型
 bq_prediction_data = []
 for target_datetime, predicted_value in predictions.items():
     bq_prediction_data.append({
         'execution_id': execution_id,
-        'prediction_date': target_datetime.strftime('%Y-%m-%d'),
+        'prediction_date': pd.Timestamp(target_datetime.date()),  # pandas Timestamp
         'prediction_hour': target_datetime.hour,
         'predicted_power_kwh': round(predicted_value, 2),
-        'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        'created_at': now
     })
 
 bq_predictions_df = pd.DataFrame(bq_prediction_data)
@@ -627,7 +630,7 @@ logger.info("プロセス実行ステータス記録開始")
 # プロセス実行ステータス作成（BigQueryのprocess_execution_logテーブルスキーマに準拠）
 process_status = {
     'execution_id': execution_id,
-    'date': end_date.date(),
+    'date': str(end_date.date()),  # 文字列に変換
     'process_type': 'ML_PREDICTION',
     'status': 'SUCCESS',
     'error_message': None,
@@ -636,12 +639,12 @@ process_status = {
     'duration_seconds': duration_seconds,
     'records_processed': len(predictions),
     'file_size_mb': None,
-    'additional_info': {
+    'additional_info': json.dumps({  # JSON文字列に変換
         'prediction_period': f"{start_date.date()} to {end_date.date()}",
         'prediction_count': len(predictions),
         'csv_saved': save_result['success'],
         'bq_saved': bq_insert_success
-    }
+    })
 }
 
 # ローカルログ保存 + BigQueryインサート
