@@ -2,10 +2,11 @@
 # 日次ETL実行スクリプト
 # cronから実行される
 
-# .bashrcから環境変数を読み込む
-source ~/.bashrc
+# 環境変数を直接設定（cronはnon-interactiveなのでbashrcが読み込まれない）
+export ENERGY_ENV_PATH=/home/teisa/dev/energy-prediction-pipeline
+export GOOGLE_APPLICATION_CREDENTIALS=/home/teisa/dev/energy-prediction-pipeline/key/energy-data-processor-key.json
 
-# プロジェクトディレクトリに移動（環境変数使用）
+# プロジェクトディレクトリに移動
 cd "$ENERGY_ENV_PATH"
 
 # 仮想環境を有効化
