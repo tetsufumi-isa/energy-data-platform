@@ -66,7 +66,7 @@ class DataQualityChecker:
         try:
             errors = self.bq_client.insert_rows_json(self.bq_log_table_id, [log_data])
             if errors:
-                raise Exception(f"BigQuery insert errors: {errors}")
+                raise Exception(f"BigQueryインサートエラー: {errors}")
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
@@ -86,24 +86,36 @@ class DataQualityChecker:
 
     def _save_check_results(self, check_results):
         """
-        チェック結果をdata_quality_checksテーブルに保存
+        チェック結果をローカルファイルとBigQueryに保存
 
         Args:
             check_results (list): チェック結果のリスト
         """
         if not check_results:
-            print("保存する品質チェック結果がありません")
-            return
+            raise ValueError("チェック結果が空です。チェック処理が正常に実行されていません")
 
+        # ローカルファイルに保存
+        check_date = check_results[0]['check_date']
+        result_file = self.log_dir / f"{check_date}_quality_check_results.jsonl"
+
+        try:
+            with open(result_file, 'w', encoding='utf-8') as f:
+                for result in check_results:
+                    f.write(json.dumps(result, ensure_ascii=False) + '\n')
+            print(f"品質チェック結果ローカル保存完了: {result_file}")
+        except Exception as e:
+            print(f"品質チェック結果ローカル保存失敗: {e}")
+
+        # BigQueryに保存
         table_ref = f"{self.project_id}.{self.dataset_id}.{self.quality_table_id}"
 
         try:
             errors = self.bq_client.insert_rows_json(table_ref, check_results)
             if errors:
                 raise Exception(f"BQインサートエラー: {errors}")
-            print(f"品質チェック結果保存完了: {len(check_results)}件")
+            print(f"品質チェック結果BQ保存完了: {len(check_results)}件")
         except Exception as e:
-            print(f"品質チェック結果保存失敗: {e}")
+            print(f"品質チェック結果BQ保存失敗: {e}")
             raise
 
     def check_power_data(self, days=7):
@@ -125,135 +137,150 @@ class DataQualityChecker:
         print(f"電力データチェック開始: {period_start} ～ {period_end}")
 
         # 1. レコード欠損チェック（期待: 24時間 × N日 = 24*N レコード）
-        expected_records = 24 * days
-        query_missing = f"""
-        SELECT COUNT(*) as actual_count
-        FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-        """
-        result = self.bq_client.query(query_missing).result()
-        actual_count = list(result)[0]['actual_count']
-        missing_count = expected_records - actual_count
+        try:
+            expected_records = 24 * days
+            query_missing = f"""
+            SELECT COUNT(*) as actual_count
+            FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+            """
+            result = self.bq_client.query(query_missing).result()
+            actual_count = list(result)[0]['actual_count']
+            missing_count = expected_records - actual_count
 
-        status = 'OK' if missing_count == 0 else ('WARNING' if missing_count < 24 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'power',
-            'check_type': 'missing',
-            'check_target': '全体',
-            'issue_count': missing_count,
-            'issue_detail': f'期待レコード数: {expected_records}, 実際: {actual_count}, 欠損: {missing_count}',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"レコード欠損チェック: {status} (欠損{missing_count}件)")
+            status = 'OK' if missing_count == 0 else ('WARNING' if missing_count < 24 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'power',
+                'check_type': 'missing',
+                'check_target': '全体',
+                'issue_count': missing_count,
+                'issue_detail': f'期待レコード数: {expected_records}, 実際: {actual_count}, 欠損: {missing_count}',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"レコード欠損チェック: {status} (欠損{missing_count}件)")
+        except Exception as e:
+            raise Exception(f"電力データ: レコード欠損チェッククエリ実行失敗 - {str(e)}")
 
         # 2. NULL値チェック - actual_power
-        query_null_power = f"""
-        SELECT COUNT(*) as null_count
-        FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND actual_power IS NULL
-        """
-        result = self.bq_client.query(query_null_power).result()
-        null_count = list(result)[0]['null_count']
+        try:
+            query_null_power = f"""
+            SELECT COUNT(*) as null_count
+            FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND actual_power IS NULL
+            """
+            result = self.bq_client.query(query_null_power).result()
+            null_count = list(result)[0]['null_count']
 
-        status = 'OK' if null_count == 0 else ('WARNING' if null_count < 10 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'power',
-            'check_type': 'null',
-            'check_target': 'actual_power',
-            'issue_count': null_count,
-            'issue_detail': f'actual_powerがNULLのレコード: {null_count}件',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  NULL値チェック(actual_power): {status} (NULL {null_count}件)")
+            status = 'OK' if null_count == 0 else ('WARNING' if null_count < 10 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'power',
+                'check_type': 'null',
+                'check_target': 'actual_power',
+                'issue_count': null_count,
+                'issue_detail': f'actual_powerがNULLのレコード: {null_count}件',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  NULL値チェック(actual_power): {status} (NULL {null_count}件)")
+        except Exception as e:
+            raise Exception(f"電力データ: actual_power NULL値チェッククエリ実行失敗 - {str(e)}")
 
         # 3. NULL値チェック - supply_capacity
-        query_null_capacity = f"""
-        SELECT COUNT(*) as null_count
-        FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND supply_capacity IS NULL
-        """
-        result = self.bq_client.query(query_null_capacity).result()
-        null_count = list(result)[0]['null_count']
+        try:
+            query_null_capacity = f"""
+            SELECT COUNT(*) as null_count
+            FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND supply_capacity IS NULL
+            """
+            result = self.bq_client.query(query_null_capacity).result()
+            null_count = list(result)[0]['null_count']
 
-        status = 'OK' if null_count == 0 else ('WARNING' if null_count < 10 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'power',
-            'check_type': 'null',
-            'check_target': 'supply_capacity',
-            'issue_count': null_count,
-            'issue_detail': f'supply_capacityがNULLのレコード: {null_count}件',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  NULL値チェック(supply_capacity): {status} (NULL {null_count}件)")
+            status = 'OK' if null_count == 0 else ('WARNING' if null_count < 10 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'power',
+                'check_type': 'null',
+                'check_target': 'supply_capacity',
+                'issue_count': null_count,
+                'issue_detail': f'supply_capacityがNULLのレコード: {null_count}件',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  NULL値チェック(supply_capacity): {status} (NULL {null_count}件)")
+        except Exception as e:
+            raise Exception(f"電力データ: supply_capacity NULL値チェッククエリ実行失敗 - {str(e)}")
 
-        # 4. 異常値チェック - actual_power（負の値・0以下・極端な値）
-        query_outlier_power = f"""
-        SELECT COUNT(*) as outlier_count
-        FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND (actual_power <= 0 OR actual_power > 1000000)
-        """
-        result = self.bq_client.query(query_outlier_power).result()
-        outlier_count = list(result)[0]['outlier_count']
+        # 4. 異常値チェック - actual_power（1500～10000の範囲外）
+        try:
+            query_outlier_power = f"""
+            SELECT COUNT(*) as outlier_count
+            FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND (actual_power < 1500 OR actual_power > 10000)
+            """
+            result = self.bq_client.query(query_outlier_power).result()
+            outlier_count = list(result)[0]['outlier_count']
 
-        status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'power',
-            'check_type': 'outlier',
-            'check_target': 'actual_power',
-            'issue_count': outlier_count,
-            'issue_detail': f'actual_powerが異常範囲（<=0 or >1000000）: {outlier_count}件',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  異常値チェック(actual_power): {status} (異常{outlier_count}件)")
+            status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'power',
+                'check_type': 'outlier',
+                'check_target': 'actual_power',
+                'issue_count': outlier_count,
+                'issue_detail': f'actual_powerが異常範囲（<1500 or >10000）: {outlier_count}件',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  異常値チェック(actual_power): {status} (異常{outlier_count}件)")
+        except Exception as e:
+            raise Exception(f"電力データ: actual_power 異常値チェッククエリ実行失敗 - {str(e)}")
 
-        # 5. 異常値チェック - supply_capacity（actual_powerより小さい）
-        query_outlier_capacity = f"""
-        SELECT COUNT(*) as outlier_count
-        FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND supply_capacity < actual_power
-        """
-        result = self.bq_client.query(query_outlier_capacity).result()
-        outlier_count = list(result)[0]['outlier_count']
+        # 5. 異常値チェック - supply_capacity（1500～10000の範囲外 or actual_powerより小さい）
+        try:
+            query_outlier_capacity = f"""
+            SELECT COUNT(*) as outlier_count
+            FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND (supply_capacity < 1500 OR supply_capacity > 10000 OR supply_capacity < actual_power)
+            """
+            result = self.bq_client.query(query_outlier_capacity).result()
+            outlier_count = list(result)[0]['outlier_count']
 
-        status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'power',
-            'check_type': 'outlier',
-            'check_target': 'supply_capacity',
-            'issue_count': outlier_count,
-            'issue_detail': f'supply_capacity < actual_power: {outlier_count}件',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  異常値チェック(supply_capacity): {status} (異常{outlier_count}件)")
+            status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'power',
+                'check_type': 'outlier',
+                'check_target': 'supply_capacity',
+                'issue_count': outlier_count,
+                'issue_detail': f'supply_capacityが異常範囲（<1500 or >10000 or <actual_power）: {outlier_count}件',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  異常値チェック(supply_capacity): {status} (異常{outlier_count}件)")
+        except Exception as e:
+            raise Exception(f"電力データ: supply_capacity 異常値チェッククエリ実行失敗 - {str(e)}")
 
         print(f"電力データチェック完了: {len(check_results)}項目")
         return check_results
@@ -263,183 +290,202 @@ class DataQualityChecker:
         天気データの品質チェック
 
         Args:
-            days (int): チェック対象日数（直近N日 + 予測16日）
+            days (int): チェック対象日数（過去N日 + 今日から16日先予測）
 
         Returns:
             list: チェック結果のリスト
         """
         check_date = datetime.now().date()
         check_timestamp = datetime.now()
-        period_start = datetime.now().date() - timedelta(days=days-1)
-        period_end = datetime.now().date() + timedelta(days=16)  # 予測16日分も含む
+        # 過去N日（昨日まで）+ 今日から16日先の予測 = N + 17日分
+        period_start = datetime.now().date() - timedelta(days=days)
+        period_end = datetime.now().date() + timedelta(days=16)  # 今日+16日先
 
         check_results = []
         print(f"天気データチェック開始: {period_start} ～ {period_end}")
 
         # 天気データは千葉県のみチェック
-        # 1. レコード欠損チェック（期待: 24時間 × (N日 + 16日予測) レコード）
-        total_days = days + 16
-        expected_records = 24 * total_days
-        query_missing = f"""
-        SELECT COUNT(*) as actual_count
-        FROM `{self.project_id}.{self.dataset_id}.weather_data`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND prefecture = 'chiba'
-        """
-        result = self.bq_client.query(query_missing).result()
-        actual_count = list(result)[0]['actual_count']
-        missing_count = expected_records - actual_count
+        # 1. レコード欠損チェック（期待: 24時間 × (過去N日 + 今日から16日先) = 24 × (N + 17) レコード）
+        try:
+            total_days = days + 17
+            expected_records = 24 * total_days
+            query_missing = f"""
+            SELECT COUNT(*) as actual_count
+            FROM `{self.project_id}.{self.dataset_id}.weather_data`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND prefecture = '千葉県'
+            """
+            result = self.bq_client.query(query_missing).result()
+            actual_count = list(result)[0]['actual_count']
+            missing_count = expected_records - actual_count
 
-        status = 'OK' if missing_count == 0 else ('WARNING' if missing_count < 24 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'weather',
-            'check_type': 'missing',
-            'check_target': '全体',
-            'issue_count': missing_count,
-            'issue_detail': f'期待レコード数: {expected_records}, 実際: {actual_count}, 欠損: {missing_count}',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  レコード欠損チェック: {status} (欠損{missing_count}件)")
+            status = 'OK' if missing_count == 0 else ('WARNING' if missing_count < 24 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'weather',
+                'check_type': 'missing',
+                'check_target': '全体',
+                'issue_count': missing_count,
+                'issue_detail': f'期待レコード数: {expected_records}, 実際: {actual_count}, 欠損: {missing_count}',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  レコード欠損チェック: {status} (欠損{missing_count}件)")
+        except Exception as e:
+            raise Exception(f"天気データ: レコード欠損チェッククエリ実行失敗 - {str(e)}")
 
         # 2. NULL値チェック - temperature_2m
-        query_null_temp = f"""
-        SELECT COUNT(*) as null_count
-        FROM `{self.project_id}.{self.dataset_id}.weather_data`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND prefecture = 'chiba'
-          AND temperature_2m IS NULL
-        """
-        result = self.bq_client.query(query_null_temp).result()
-        null_count = list(result)[0]['null_count']
+        try:
+            query_null_temp = f"""
+            SELECT COUNT(*) as null_count
+            FROM `{self.project_id}.{self.dataset_id}.weather_data`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND prefecture = '千葉県'
+              AND temperature_2m IS NULL
+            """
+            result = self.bq_client.query(query_null_temp).result()
+            null_count = list(result)[0]['null_count']
 
-        status = 'OK' if null_count == 0 else ('WARNING' if null_count < 10 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'weather',
-            'check_type': 'null',
-            'check_target': 'temperature_2m',
-            'issue_count': null_count,
-            'issue_detail': f'temperature_2mがNULLのレコード: {null_count}件',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  NULL値チェック(temperature_2m): {status} (NULL {null_count}件)")
+            status = 'OK' if null_count == 0 else ('WARNING' if null_count < 10 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'weather',
+                'check_type': 'null',
+                'check_target': 'temperature_2m',
+                'issue_count': null_count,
+                'issue_detail': f'temperature_2mがNULLのレコード: {null_count}件',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  NULL値チェック(temperature_2m): {status} (NULL {null_count}件)")
+        except Exception as e:
+            raise Exception(f"天気データ: temperature_2m NULL値チェッククエリ実行失敗 - {str(e)}")
 
         # 3. NULL値チェック - relative_humidity_2m
-        query_null_humidity = f"""
-        SELECT COUNT(*) as null_count
-        FROM `{self.project_id}.{self.dataset_id}.weather_data`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND prefecture = 'chiba'
-          AND relative_humidity_2m IS NULL
-        """
-        result = self.bq_client.query(query_null_humidity).result()
-        null_count = list(result)[0]['null_count']
+        try:
+            query_null_humidity = f"""
+            SELECT COUNT(*) as null_count
+            FROM `{self.project_id}.{self.dataset_id}.weather_data`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND prefecture = '千葉県'
+              AND relative_humidity_2m IS NULL
+            """
+            result = self.bq_client.query(query_null_humidity).result()
+            null_count = list(result)[0]['null_count']
 
-        status = 'OK' if null_count == 0 else ('WARNING' if null_count < 10 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'weather',
-            'check_type': 'null',
-            'check_target': 'relative_humidity_2m',
-            'issue_count': null_count,
-            'issue_detail': f'relative_humidity_2mがNULLのレコード: {null_count}件',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  NULL値チェック(relative_humidity_2m): {status} (NULL {null_count}件)")
+            status = 'OK' if null_count == 0 else ('WARNING' if null_count < 10 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'weather',
+                'check_type': 'null',
+                'check_target': 'relative_humidity_2m',
+                'issue_count': null_count,
+                'issue_detail': f'relative_humidity_2mがNULLのレコード: {null_count}件',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  NULL値チェック(relative_humidity_2m): {status} (NULL {null_count}件)")
+        except Exception as e:
+            raise Exception(f"天気データ: relative_humidity_2m NULL値チェッククエリ実行失敗 - {str(e)}")
 
-        # 4. 異常値チェック - temperature_2m（-50～50℃範囲外）
-        query_outlier_temp = f"""
-        SELECT COUNT(*) as outlier_count
-        FROM `{self.project_id}.{self.dataset_id}.weather_data`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND prefecture = 'chiba'
-          AND (temperature_2m < -50 OR temperature_2m > 50)
-        """
-        result = self.bq_client.query(query_outlier_temp).result()
-        outlier_count = list(result)[0]['outlier_count']
+        # 4. 異常値チェック - temperature_2m（-10～50℃範囲外）
+        try:
+            query_outlier_temp = f"""
+            SELECT COUNT(*) as outlier_count
+            FROM `{self.project_id}.{self.dataset_id}.weather_data`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND prefecture = '千葉県'
+              AND (temperature_2m < -10 OR temperature_2m > 50)
+            """
+            result = self.bq_client.query(query_outlier_temp).result()
+            outlier_count = list(result)[0]['outlier_count']
 
-        status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'weather',
-            'check_type': 'outlier',
-            'check_target': 'temperature_2m',
-            'issue_count': outlier_count,
-            'issue_detail': f'temperature_2mが異常範囲（<-50 or >50）: {outlier_count}件',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  異常値チェック(temperature_2m): {status} (異常{outlier_count}件)")
+            status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'weather',
+                'check_type': 'outlier',
+                'check_target': 'temperature_2m',
+                'issue_count': outlier_count,
+                'issue_detail': f'temperature_2mが異常範囲（<-10 or >50）: {outlier_count}件',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  異常値チェック(temperature_2m): {status} (異常{outlier_count}件)")
+        except Exception as e:
+            raise Exception(f"天気データ: temperature_2m 異常値チェッククエリ実行失敗 - {str(e)}")
 
         # 5. 異常値チェック - relative_humidity_2m（0～100%範囲外）
-        query_outlier_humidity = f"""
-        SELECT COUNT(*) as outlier_count
-        FROM `{self.project_id}.{self.dataset_id}.weather_data`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND prefecture = 'chiba'
-          AND (relative_humidity_2m < 0 OR relative_humidity_2m > 100)
-        """
-        result = self.bq_client.query(query_outlier_humidity).result()
-        outlier_count = list(result)[0]['outlier_count']
+        try:
+            query_outlier_humidity = f"""
+            SELECT COUNT(*) as outlier_count
+            FROM `{self.project_id}.{self.dataset_id}.weather_data`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND prefecture = '千葉県'
+              AND (relative_humidity_2m < 0 OR relative_humidity_2m > 100)
+            """
+            result = self.bq_client.query(query_outlier_humidity).result()
+            outlier_count = list(result)[0]['outlier_count']
 
-        status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'weather',
-            'check_type': 'outlier',
-            'check_target': 'relative_humidity_2m',
-            'issue_count': outlier_count,
-            'issue_detail': f'relative_humidity_2mが異常範囲（<0 or >100）: {outlier_count}件',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  異常値チェック(relative_humidity_2m): {status} (異常{outlier_count}件)")
+            status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'weather',
+                'check_type': 'outlier',
+                'check_target': 'relative_humidity_2m',
+                'issue_count': outlier_count,
+                'issue_detail': f'relative_humidity_2mが異常範囲（<0 or >100）: {outlier_count}件',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  異常値チェック(relative_humidity_2m): {status} (異常{outlier_count}件)")
+        except Exception as e:
+            raise Exception(f"天気データ: relative_humidity_2m 異常値チェッククエリ実行失敗 - {str(e)}")
 
-        # 6. 異常値チェック - precipitation（負の値）
-        query_outlier_precip = f"""
-        SELECT COUNT(*) as outlier_count
-        FROM `{self.project_id}.{self.dataset_id}.weather_data`
-        WHERE date >= '{period_start}'
-          AND date <= '{period_end}'
-          AND prefecture = 'chiba'
-          AND precipitation < 0
-        """
-        result = self.bq_client.query(query_outlier_precip).result()
-        outlier_count = list(result)[0]['outlier_count']
+        # 6. 異常値チェック - precipitation（0～40mm範囲外）
+        try:
+            query_outlier_precip = f"""
+            SELECT COUNT(*) as outlier_count
+            FROM `{self.project_id}.{self.dataset_id}.weather_data`
+            WHERE date >= '{period_start}'
+              AND date <= '{period_end}'
+              AND prefecture = '千葉県'
+              AND (precipitation < 0 OR precipitation > 40)
+            """
+            result = self.bq_client.query(query_outlier_precip).result()
+            outlier_count = list(result)[0]['outlier_count']
 
-        status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
-        check_results.append({
-            'check_date': str(check_date),
-            'check_timestamp': check_timestamp.isoformat(),
-            'data_type': 'weather',
-            'check_type': 'outlier',
-            'check_target': 'precipitation',
-            'issue_count': outlier_count,
-            'issue_detail': f'precipitationが負の値: {outlier_count}件',
-            'check_period_start': str(period_start),
-            'check_period_end': str(period_end),
-            'status': status
-        })
-        print(f"  異常値チェック(precipitation): {status} (異常{outlier_count}件)")
+            status = 'OK' if outlier_count == 0 else ('WARNING' if outlier_count < 5 else 'ERROR')
+            check_results.append({
+                'check_date': str(check_date),
+                'check_timestamp': check_timestamp.isoformat(),
+                'data_type': 'weather',
+                'check_type': 'outlier',
+                'check_target': 'precipitation',
+                'issue_count': outlier_count,
+                'issue_detail': f'precipitationが異常範囲（<0 or >40）: {outlier_count}件',
+                'check_period_start': str(period_start),
+                'check_period_end': str(period_end),
+                'status': status
+            })
+            print(f"  異常値チェック(precipitation): {status} (異常{outlier_count}件)")
+        except Exception as e:
+            raise Exception(f"天気データ: precipitation 異常値チェッククエリ実行失敗 - {str(e)}")
 
         print(f"天気データチェック完了: {len(check_results)}項目")
         return check_results
@@ -479,7 +525,15 @@ class DataQualityChecker:
 
             print(f"\nデータ品質チェック完了: ERROR={error_count}, WARNING={warning_count}, OK={ok_count}")
 
-            # 成功ログ記録
+            # データ品質結果に応じたステータス判定
+            if error_count > 0:
+                overall_status = "ERROR"
+            elif warning_count > 0:
+                overall_status = "WARNING"
+            else:
+                overall_status = "OK"
+
+            # 品質チェック結果ログ記録
             completed_at = datetime.now()
             duration_seconds = int((completed_at - started_at).total_seconds())
 
@@ -487,7 +541,7 @@ class DataQualityChecker:
                 "execution_id": execution_id,
                 "date": target_date_str,
                 "process_type": "DATA_QUALITY_CHECK",
-                "status": "SUCCESS",
+                "status": overall_status,
                 "error_message": None,
                 "started_at": started_at.isoformat(),
                 "completed_at": completed_at.isoformat(),
