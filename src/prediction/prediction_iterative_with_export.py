@@ -1,10 +1,10 @@
 # %%
 # ================================================================
 # 日次予測実行スクリプト（Phase 11）
-# 目的: 今日から16日間の電力使用量を予測
+# 目的: 今日から14日間の電力使用量を予測
 # データソース: BigQuery（昨日までの学習データ・今日からの気象データ）
 # 出力: CSV形式の予測結果 + BigQueryステータスログ
-# 検証: 別モジュール（16日に1回実行）
+# 検証: 別モジュール（14日に1回実行）
 # ================================================================
 
 import pandas as pd
@@ -222,9 +222,9 @@ try:
     )
     ml_features_train = ml_features_train.set_index('datetime')
 
-    # 予測期間設定（今日から16日間）
+    # 予測期間設定（今日から14日間）
     today = datetime.now().strftime('%Y-%m-%d')
-    end_date_str = (datetime.now() + timedelta(days=15)).strftime('%Y-%m-%d')
+    end_date_str = (datetime.now() + timedelta(days=13)).strftime('%Y-%m-%d')
     logger.info(f"予測期間: {today} ～ {end_date_str}")
 
     # calendar_dataテーブル取得（営業日判定用・予測期間のみ）
@@ -245,7 +245,7 @@ try:
     logger.info(f"カレンダーデータ取得完了: {len(calendar_data):,}件")
     print(f"カレンダーデータ取得完了: {len(calendar_data):,}件")
 
-    # 予測期間の気象・カレンダーデータ取得（未来データ生成用・今日から16日間）
+    # 予測期間の気象・カレンダーデータ取得（未来データ生成用・今日から14日間）
     logger.info("予測期間の気象・カレンダーデータ取得開始")
     query_future_data = f"""
     SELECT
@@ -443,10 +443,10 @@ def prepare_features(target_datetime, predictions):
 
 # %%
 # ================================================================
-# 5. 段階的予測実行（今日から16日間）
+# 5. 段階的予測実行（今日から14日間）
 # ================================================================
 
-# 予測期間設定（今日から16日間）
+# 予測期間設定（今日から14日間）
 start_date = pd.to_datetime(today)
 end_date = pd.to_datetime(end_date_str)
 
@@ -456,16 +456,16 @@ daily_results = []
 
 logger.info("段階的予測実行開始")
 logger.info(f"予測期間: {start_date.date()} ～ {end_date.date()}")
-logger.info(f"予測回数: {16 * 24}回（16日×24時間）")
+logger.info(f"予測回数: {14 * 24}回（14日×24時間）")
 
 print(f"\n段階的予測実行開始")
 print(f"予測期間: {start_date.date()} ～ {end_date.date()}")
-print(f"予測回数: {16 * 24}回（16日×24時間）")
+print(f"予測回数: {14 * 24}回（14日×24時間）")
 
-# 16日間の段階的予測
+# 14日間の段階的予測
 current_date = start_date
 
-for day in range(16):
+for day in range(14):
     print(f"\nDay {day+1}: {current_date.strftime('%Y-%m-%d')}")
 
     # 1日24時間の予測
