@@ -3,11 +3,11 @@
 
 Phase 11: 柔軟な過去データ取得対応
 - Historical API: 過去データ取得（2日遅延考慮）
-- Forecast API: 16日間の予測データ取得
+- Forecast API: 14日間の予測データ取得（実行時刻による欠損防止）
 - 期間指定・月指定による柔軟な過去データ取得
 
 実行方法:
-    # 日次自動実行用（過去10日+予測16日）
+    # 日次自動実行用（過去10日+予測14日）
     python -m src.data_processing.weather_downloader
 
     # 過去データ分析用（指定日から30日前まで）
@@ -89,8 +89,8 @@ class WeatherDownloader:
         Args:
             log_data (dict): ログデータ
         """
-        # ローカルファイルに記録
-        log_date = log_data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        # ローカルファイルに記録（実行日の日付を使用）
+        log_date = datetime.now().strftime('%Y-%m-%d')
         log_file = self.log_dir / f"{log_date}_weather_execution.jsonl"
 
         try:
@@ -184,14 +184,14 @@ class WeatherDownloader:
         print(f"過去データダウンロード中: {start_date} ～ {end_date}")
         return self.download_with_retry(session, self.HISTORICAL_URL, params)
     
-    def get_forecast_data(self, session, forecast_days=16):
+    def get_forecast_data(self, session, forecast_days=14):
         """
         Forecast API で予測データ取得
-        
+
         Args:
             session (requests.Session): HTTPセッション
-            forecast_days (int): 予測日数（最大16日）
-            
+            forecast_days (int): 予測日数（最大14日・安定動作保証）
+
         Returns:
             requests.Response: HTTPレスポンスオブジェクト
         """
@@ -199,7 +199,7 @@ class WeatherDownloader:
             'latitude': self.CHIBA_COORDS['latitude'],
             'longitude': self.CHIBA_COORDS['longitude'],
             'hourly': ','.join(self.WEATHER_VARIABLES),
-            'forecast_days': min(forecast_days, 16),  # 制限対応
+            'forecast_days': min(forecast_days, 14),  # 実行時刻による欠損を防ぐため14日に制限
             'timezone': 'Asia/Tokyo'
         }
         
@@ -311,7 +311,7 @@ class WeatherDownloader:
         
         Args:
             target_date (str): 基準日 (YYYY-MM-DD形式)
-                             None: 日次自動実行用（過去10日+予測16日）
+                             None: 日次自動実行用（過去10日+予測14日）
                              指定: 過去データ分析用（指定日から30日前まで）
         
         Returns:
@@ -325,7 +325,7 @@ class WeatherDownloader:
             started_at = datetime.now()
             target_date_str = started_at.strftime('%Y-%m-%d')
 
-            print("日次自動実行モード: 過去データ(10日前～3日前) + 予測データ(16日間)")
+            print("日次自動実行モード: 過去データ(10日前～3日前) + 予測データ(14日間)")
 
             # 過去データ: 10日前から3日前まで（API遅延考慮）
             historical_start = (today - timedelta(days=10)).strftime('%Y-%m-%d')
@@ -365,21 +365,21 @@ class WeatherDownloader:
                 })
                 
                 # 2. 予測データ取得
-                forecast_response = self.get_forecast_data(session, forecast_days=16)
+                forecast_response = self.get_forecast_data(session, forecast_days=14)
 
                 # レスポンス検証
                 validation = self.validate_response(forecast_response)
                 if not validation['valid']:
                         print(f"予測データ検証問題: {validation['issues']}")
                         raise ValueError(f"予測データ検証失敗: {validation['issues']}")
-                
+
                 # ファイル名
                 forecast_filename = f"chiba_{year}_{date_part}_forecast.json"
                 forecast_path = self.save_json_response(forecast_response, forecast_filename)
-                
+
                 results['forecast'].append({
                     'file': forecast_path,
-                    'forecast_days': 16,
+                    'forecast_days': 14,
                     'data_points': validation['stats'].get('total_hours', 0) if validation['valid'] else 0,
                     'validation': validation
                 })
@@ -404,7 +404,7 @@ class WeatherDownloader:
                     "additional_info": json.dumps({
                         "mode": "daily_automatic",
                         "historical_period": f"{historical_start} to {historical_end}",
-                        "forecast_days": 16,
+                        "forecast_days": 14,
                         "historical_files": len(results['historical']),
                         "forecast_files": len(results['forecast'])
                     })
@@ -433,7 +433,7 @@ class WeatherDownloader:
                     "additional_info": json.dumps({
                         "mode": "daily_automatic",
                         "historical_period": f"{historical_start} to {historical_end}",
-                        "forecast_days": 16
+                        "forecast_days": 14
                     })
                 }
 
@@ -872,7 +872,7 @@ def main():
             historical_start = (today - timedelta(days=10)).strftime('%Y-%m-%d')
             historical_end = (today - timedelta(days=3)).strftime('%Y-%m-%d')
             print(f"日次自動実行モード")
-            print(f"取得範囲: 過去データ({historical_start}〜{historical_end}) + 予測データ(16日間)")
+            print(f"取得範囲: 過去データ({historical_start}〜{historical_end}) + 予測データ(14日間)")
             results = downloader.download_daily_weather_data()
 
         # 結果表示

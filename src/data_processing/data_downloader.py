@@ -56,8 +56,8 @@ class PowerDataDownloader:
         Args:
             log_data (dict): ログデータ
         """
-        # ローカルファイルに記録
-        log_date = log_data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        # ローカルファイルに記録（実行日の日付を使用）
+        log_date = datetime.now().strftime('%Y-%m-%d')
         log_file = self.log_dir / f"{log_date}_tepco_execution.jsonl"
 
         try:

@@ -52,8 +52,8 @@ class DataQualityChecker:
         Args:
             log_data (dict): ログデータ
         """
-        # ローカルファイルに記録
-        log_date = log_data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        # ローカルファイルに記録（実行日の日付を使用）
+        log_date = datetime.now().strftime('%Y-%m-%d')
         log_file = self.log_dir / f"{log_date}_quality_check_execution.jsonl"
 
         try:
@@ -94,9 +94,9 @@ class DataQualityChecker:
         if not check_results:
             raise ValueError("チェック結果が空です。チェック処理が正常に実行されていません")
 
-        # ローカルファイルに保存
-        check_date = check_results[0]['check_date']
-        result_file = self.log_dir / f"{check_date}_quality_check_results.jsonl"
+        # ローカルファイルに保存（実行日の日付を使用）
+        execution_date = datetime.now().strftime('%Y-%m-%d')
+        result_file = self.log_dir / f"{execution_date}_quality_check_results.jsonl"
 
         try:
             with open(result_file, 'w', encoding='utf-8') as f:
@@ -290,24 +290,24 @@ class DataQualityChecker:
         天気データの品質チェック
 
         Args:
-            days (int): チェック対象日数（過去N日 + 今日から16日先予測）
+            days (int): チェック対象日数（過去N日 + 今日から14日先予測）
 
         Returns:
             list: チェック結果のリスト
         """
         check_date = datetime.now().date()
         check_timestamp = datetime.now()
-        # 過去N日（昨日まで）+ 今日から16日先の予測 = N + 17日分
+        # 過去N日（昨日まで）+ 今日から14日間の予測 = N + 14日分
         period_start = datetime.now().date() - timedelta(days=days)
-        period_end = datetime.now().date() + timedelta(days=16)  # 今日+16日先
+        period_end = datetime.now().date() + timedelta(days=13)  # 今日+13日後（14日間）
 
         check_results = []
         print(f"天気データチェック開始: {period_start} ～ {period_end}")
 
         # 天気データは千葉県のみチェック
-        # 1. レコード欠損チェック（期待: 24時間 × (過去N日 + 今日から16日先) = 24 × (N + 17) レコード）
+        # 1. レコード欠損チェック（期待: 24時間 × (過去N日 + 今日 + 未来13日) = 24 × (N + 14) レコード）
         try:
-            total_days = days + 17
+            total_days = days + 14  # 過去N日 + 今日 + 未来13日 = N + 14日分
             expected_records = 24 * total_days
             query_missing = f"""
             SELECT COUNT(*) as actual_count
