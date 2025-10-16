@@ -53,146 +53,174 @@ class DashboardDataUpdater:
 
         Returns:
             int: 削除行数
+
+        Raises:
+            Exception: BigQueryエラー時
         """
-        delete_query = f"""
-        DELETE FROM `{self.project_id}.{self.dataset_id}.{self.table_id}`
-        WHERE date >= CURRENT_DATE('Asia/Tokyo')
+        try:
+            delete_query = f"""
+            DELETE FROM `{self.project_id}.{self.dataset_id}.{self.table_id}`
+            WHERE date >= CURRENT_DATE('Asia/Tokyo')
+            """
+
+            job = self.bq_client.query(delete_query)
+            job.result()  # クエリ完了を待機（返り値は使用しない）
+            deleted_rows = job.num_dml_affected_rows
+
+            print(f"今日以降のデータ削除完了: {deleted_rows}行削除")
+            return deleted_rows
+
+        except Exception as e:
+            error_msg = f"データ削除SQL実行失敗: {e}"
+            print(error_msg)
+            raise Exception(error_msg)
+
+    def insert_dashboard_data_direct(self):
         """
-
-        job = self.bq_client.query(delete_query)
-        result = job.result()
-        deleted_rows = job.num_dml_affected_rows
-
-        print(f"今日以降のデータ削除完了: {deleted_rows}行削除")
-        return deleted_rows
-
-    def fetch_integrated_data(self):
-        """
-        各テーブルからデータを統合取得
-
-        Returns:
-            list: 統合データの行リスト
-        """
-        # 今日以降のデータを取得（実績+予測）
-        query = f"""
-        WITH latest_predictions AS (
-          -- 最新のexecution_idの予測データのみを取得
-          SELECT
-            prediction_date,
-            prediction_hour,
-            predicted_power_kwh,
-            ROW_NUMBER() OVER (
-              PARTITION BY prediction_date, prediction_hour
-              ORDER BY created_at DESC
-            ) as rn
-          FROM `{self.project_id}.{self.dataset_id}.prediction_results`
-          WHERE prediction_date >= CURRENT_DATE('Asia/Tokyo')
-        )
-        SELECT
-          e.date,
-          e.hour,
-          e.actual_power,
-          e.supply_capacity,
-          p.predicted_power_kwh AS predicted_power,
-
-          -- 誤差計算（予測データがある場合のみ）
-          CASE
-            WHEN p.predicted_power_kwh IS NOT NULL AND e.actual_power IS NOT NULL
-            THEN ABS(p.predicted_power_kwh - e.actual_power)
-            ELSE NULL
-          END AS error_absolute,
-
-          CASE
-            WHEN p.predicted_power_kwh IS NOT NULL AND e.actual_power IS NOT NULL AND e.actual_power > 0
-            THEN (ABS(p.predicted_power_kwh - e.actual_power) / e.actual_power) * 100
-            ELSE NULL
-          END AS error_percentage,
-
-          -- 天気データ
-          w.temperature_2m,
-          w.relative_humidity_2m,
-          w.precipitation,
-          w.weather_code,
-
-          -- カレンダー情報
-          c.day_of_week,
-          c.is_weekend,
-          c.is_holiday,
-
-          -- 使用率計算
-          CASE
-            WHEN e.supply_capacity > 0
-            THEN ROUND((e.actual_power / e.supply_capacity) * 100, 1)
-            ELSE NULL
-          END AS usage_rate,
-
-          -- 曜日日本語表記
-          CASE c.day_of_week
-            WHEN 'Monday' THEN '月'
-            WHEN 'Tuesday' THEN '火'
-            WHEN 'Wednesday' THEN '水'
-            WHEN 'Thursday' THEN '木'
-            WHEN 'Friday' THEN '金'
-            WHEN 'Saturday' THEN '土'
-            WHEN 'Sunday' THEN '日'
-            ELSE NULL
-          END AS weekday_jp,
-
-          CURRENT_TIMESTAMP() AS created_at
-
-        FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly` e
-
-        -- 天気データを結合（千葉県のデータ、hourをINTEGERにCASTして結合）
-        LEFT JOIN `{self.project_id}.{self.dataset_id}.weather_data` w
-          ON e.date = w.date
-          AND e.hour = CAST(w.hour AS INT64)
-          AND w.prefecture = '千葉県'
-
-        -- カレンダー情報を結合
-        LEFT JOIN `{self.project_id}.{self.dataset_id}.calendar_data` c
-          ON e.date = c.date
-
-        -- 最新の予測データを結合
-        LEFT JOIN latest_predictions p
-          ON e.date = p.prediction_date
-          AND e.hour = p.prediction_hour
-          AND p.rn = 1
-
-        WHERE e.date >= CURRENT_DATE('Asia/Tokyo')
-        ORDER BY e.date ASC, e.hour ASC
-        """
-
-        query_job = self.bq_client.query(query)
-        results = query_job.result()
-
-        rows = []
-        for row in results:
-            rows.append(dict(row))
-
-        print(f"統合データ取得完了: {len(rows)}行")
-        return rows
-
-    def insert_dashboard_data(self, rows):
-        """
-        ダッシュボードデータを投入
-
-        Args:
-            rows (list): 投入データリスト
+        BigQuery内で直接INSERT
+        各テーブルからデータを統合してdashboard_dataに投入
 
         Returns:
             int: 投入行数
+
+        Raises:
+            Exception: BigQueryエラー時
         """
-        if not rows:
-            print("投入データなし")
-            return 0
+        try:
+            insert_query = f"""
+            INSERT INTO `{self.project_id}.{self.dataset_id}.{self.table_id}` (
+                date, hour, actual_power, supply_capacity, predicted_power,
+                error_absolute, error_percentage,
+                temperature_2m, relative_humidity_2m, precipitation, weather_code,
+                day_of_week, is_weekend, is_holiday,
+                usage_rate, weekday_jp
+            )
+            WITH latest_energy AS (
+              -- 最新の電力データのみを取得（重複排除）
+              SELECT
+                date,
+                hour,
+                actual_power,
+                supply_capacity,
+                ROW_NUMBER() OVER (
+                  PARTITION BY date, hour
+                  ORDER BY created_at DESC
+                ) as rn
+              FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
+              WHERE date >= CURRENT_DATE('Asia/Tokyo')
+            ),
+            latest_weather AS (
+              -- 最新の天気データのみを取得（重複排除）
+              SELECT
+                date,
+                hour,
+                temperature_2m,
+                relative_humidity_2m,
+                precipitation,
+                weather_code,
+                ROW_NUMBER() OVER (
+                  PARTITION BY date, hour
+                  ORDER BY created_at DESC
+                ) as rn
+              FROM `{self.project_id}.{self.dataset_id}.weather_data`
+              WHERE date >= CURRENT_DATE('Asia/Tokyo')
+                AND prefecture = '千葉県'
+            ),
+            latest_predictions AS (
+              -- 最新の予測データのみを取得
+              SELECT
+                prediction_date,
+                prediction_hour,
+                predicted_power_kwh,
+                ROW_NUMBER() OVER (
+                  PARTITION BY prediction_date, prediction_hour
+                  ORDER BY created_at DESC
+                ) as rn
+              FROM `{self.project_id}.{self.dataset_id}.prediction_results`
+              WHERE prediction_date >= CURRENT_DATE('Asia/Tokyo')
+            )
+            SELECT
+              e.date,
+              e.hour,
+              e.actual_power,
+              e.supply_capacity,
+              p.predicted_power_kwh AS predicted_power,
 
-        table_ref = f"{self.project_id}.{self.dataset_id}.{self.table_id}"
-        errors = self.bq_client.insert_rows_json(table_ref, rows)
-        if errors:
-            raise Exception(f"BQインサートエラー: {errors}")
+              -- 誤差計算（予測データがある場合のみ）
+              CASE
+                WHEN p.predicted_power_kwh IS NOT NULL AND e.actual_power IS NOT NULL
+                THEN ABS(p.predicted_power_kwh - e.actual_power)
+                ELSE NULL
+              END AS error_absolute,
 
-        print(f"ダッシュボードデータ投入完了: {len(rows)}行")
-        return len(rows)
+              CASE
+                WHEN p.predicted_power_kwh IS NOT NULL AND e.actual_power IS NOT NULL AND e.actual_power > 0
+                THEN (ABS(p.predicted_power_kwh - e.actual_power) / e.actual_power) * 100
+                ELSE NULL
+              END AS error_percentage,
+
+              -- 天気データ
+              w.temperature_2m,
+              w.relative_humidity_2m,
+              w.precipitation,
+              w.weather_code,
+
+              -- カレンダー情報
+              c.day_of_week,
+              c.is_weekend,
+              c.is_holiday,
+
+              -- 使用率計算
+              CASE
+                WHEN e.supply_capacity > 0
+                THEN ROUND((e.actual_power / e.supply_capacity) * 100, 1)
+                ELSE NULL
+              END AS usage_rate,
+
+              -- 曜日日本語表記
+              CASE c.day_of_week
+                WHEN 'Monday' THEN '月'
+                WHEN 'Tuesday' THEN '火'
+                WHEN 'Wednesday' THEN '水'
+                WHEN 'Thursday' THEN '木'
+                WHEN 'Friday' THEN '金'
+                WHEN 'Saturday' THEN '土'
+                WHEN 'Sunday' THEN '日'
+                ELSE NULL
+              END AS weekday_jp
+
+            FROM latest_energy e
+
+            -- 最新の天気データを結合（重複なし）
+            LEFT JOIN latest_weather w
+              ON e.date = w.date
+              AND e.hour = CAST(w.hour AS INT64)
+              AND w.rn = 1
+
+            -- カレンダー情報を結合
+            LEFT JOIN `{self.project_id}.{self.dataset_id}.calendar_data` c
+              ON e.date = c.date
+
+            -- 最新の予測データを結合
+            LEFT JOIN latest_predictions p
+              ON e.date = p.prediction_date
+              AND e.hour = p.prediction_hour
+              AND p.rn = 1
+
+            WHERE e.rn = 1
+            """
+
+            job = self.bq_client.query(insert_query)
+            job.result()  # クエリ完了を待機
+            inserted_rows = job.num_dml_affected_rows
+
+            print(f"ダッシュボードデータ投入完了: {inserted_rows}行")
+            return inserted_rows
+
+        except Exception as e:
+            error_msg = f"データ投入SQL実行失敗: {e}"
+            print(error_msg)
+            raise Exception(error_msg)
 
     def _write_log(self, log_data):
         """
@@ -215,7 +243,7 @@ class DashboardDataUpdater:
         try:
             errors = self.bq_client.insert_rows_json(self.bq_log_table_id, [log_data])
             if errors:
-                raise Exception(f"BigQuery insert errors: {errors}")
+                raise Exception(f"BigQueryログ投入エラー: {errors}")
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
@@ -256,11 +284,8 @@ class DashboardDataUpdater:
             # 1. 今日以降のデータ削除
             deleted_rows = self.delete_future_data()
 
-            # 2. 統合データ取得
-            integrated_rows = self.fetch_integrated_data()
-
-            # 3. データ投入
-            inserted_rows = self.insert_dashboard_data(integrated_rows)
+            # 2. BigQuery内で統合データを直接投入
+            inserted_rows = self.insert_dashboard_data_direct()
 
             print(f"ダッシュボードデータ更新完了: 削除{deleted_rows}行, 挿入{inserted_rows}行")
 
