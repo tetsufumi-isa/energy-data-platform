@@ -1,11 +1,11 @@
 """
-ダッシュボードデータ更新システム
+ml_featuresテーブル差分更新モジュール
 
-Looker Studio用のdashboard_dataテーブルを更新する。
-電力・天気・カレンダー・予測データを統合して投入。
+電力・天気データ投入後に実行し、ml_featuresテーブルを最新化する。
+過去7日分を削除→再投入する方式で効率的に更新。
 
 実行方法:
-    python -m src.data_processing.dashboard_data_updater
+    python -m src.data_processing.ml_features_updater
 """
 
 import json
@@ -16,8 +16,8 @@ from pathlib import Path
 from google.cloud import bigquery
 
 
-class DashboardDataUpdater:
-    """ダッシュボードデータ更新クラス"""
+class MLFeaturesUpdater:
+    """ml_features差分更新クラス"""
 
     def __init__(self, project_id="energy-env"):
         """
@@ -28,7 +28,7 @@ class DashboardDataUpdater:
         """
         self.project_id = project_id
         self.dataset_id = "prod_energy_data"
-        self.table_id = "dashboard_data"
+        self.table_id = "ml_features"
 
         # 環境変数チェック
         energy_env_path = os.getenv('ENERGY_ENV_PATH')
@@ -36,7 +36,7 @@ class DashboardDataUpdater:
             raise ValueError("ENERGY_ENV_PATH環境変数が設定されていません")
 
         # ログディレクトリ設定
-        self.log_dir = Path(energy_env_path) / 'logs' / 'dashboard_updater'
+        self.log_dir = Path(energy_env_path) / 'logs' / 'ml_features_updater'
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # BigQueryクライアント初期化
@@ -45,11 +45,11 @@ class DashboardDataUpdater:
         # BQログテーブル設定
         self.bq_log_table_id = f"{self.project_id}.{self.dataset_id}.process_execution_log"
 
-        print(f"DashboardDataUpdater初期化完了: {project_id}")
+        print(f"MLFeaturesUpdater初期化完了: {project_id}")
 
-    def delete_future_data(self):
+    def delete_recent_data(self):
         """
-        7日前以降のデータを全削除
+        過去7日分のデータを削除
 
         Returns:
             int: 削除行数
@@ -64,10 +64,10 @@ class DashboardDataUpdater:
             """
 
             job = self.bq_client.query(delete_query)
-            job.result()  # クエリ完了を待機（返り値は使用しない）
+            job.result()  # クエリ完了を待機
             deleted_rows = job.num_dml_affected_rows
 
-            print(f"7日前以降のデータ削除完了: {deleted_rows}行削除")
+            print(f"過去7日分のデータ削除完了: {deleted_rows}行削除")
             return deleted_rows
 
         except Exception as e:
@@ -75,10 +75,10 @@ class DashboardDataUpdater:
             print(error_msg)
             raise Exception(error_msg)
 
-    def insert_dashboard_data_direct(self):
+    def insert_ml_features(self):
         """
-        BigQuery内で直接INSERT
-        各テーブルからデータを統合してdashboard_dataに投入
+        過去7日分のml_featuresデータを再投入
+        create_ml_features_table.sqlのロジックを流用
 
         Returns:
             int: 投入行数
@@ -89,132 +89,74 @@ class DashboardDataUpdater:
         try:
             insert_query = f"""
             INSERT INTO `{self.project_id}.{self.dataset_id}.{self.table_id}` (
-                date, hour, actual_power, supply_capacity, predicted_power,
-                error_absolute, error_percentage,
+                date, hour, actual_power, supply_capacity,
                 temperature_2m, relative_humidity_2m, precipitation, weather_code,
-                day_of_week, is_weekend, is_holiday,
-                usage_rate, weekday_jp
+                day_of_week, is_weekend, is_holiday, month,
+                hour_sin, hour_cos,
+                lag_1_day, lag_7_day, lag_1_business_day
             )
-            WITH latest_energy AS (
-              -- 最新の電力データのみを取得（重複排除）
+            WITH base_data AS (
               SELECT
-                date,
-                hour,
-                actual_power,
-                supply_capacity,
-                ROW_NUMBER() OVER (
-                  PARTITION BY date, hour
-                  ORDER BY created_at DESC
-                ) as rn
-              FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
-              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
-            ),
-            latest_weather AS (
-              -- 最新の天気データのみを取得（重複排除）
-              SELECT
-                date,
-                hour,
-                temperature_2m,
-                relative_humidity_2m,
-                precipitation,
-                weather_code,
-                ROW_NUMBER() OVER (
-                  PARTITION BY date, hour
-                  ORDER BY created_at DESC
-                ) as rn
-              FROM `{self.project_id}.{self.dataset_id}.weather_data`
-              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
-                AND prefecture = '千葉県'
-            ),
-            latest_predictions AS (
-              -- 最新の予測データのみを取得
-              SELECT
-                prediction_date,
-                prediction_hour,
-                predicted_power_kwh,
-                ROW_NUMBER() OVER (
-                  PARTITION BY prediction_date, prediction_hour
-                  ORDER BY created_at DESC
-                ) as rn
-              FROM `{self.project_id}.{self.dataset_id}.prediction_results`
-              WHERE prediction_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
+                energy.date,
+                energy.hour,
+                energy.actual_power,
+                energy.supply_capacity,
+                weather.temperature_2m,
+                weather.relative_humidity_2m,
+                weather.precipitation,
+                weather.weather_code,
+                calendar.day_of_week,
+                calendar.is_weekend,
+                calendar.is_holiday,
+                EXTRACT(MONTH FROM energy.date) as month
+              FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly` energy
+              LEFT JOIN `{self.project_id}.{self.dataset_id}.weather_data` weather
+                ON energy.date = weather.date
+                AND energy.hour = CAST(weather.hour AS INT64)
+                AND weather.prefecture = '千葉県'
+              LEFT JOIN `{self.project_id}.{self.dataset_id}.calendar_data` calendar
+                ON energy.date = calendar.date
+              WHERE energy.date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
             )
             SELECT
-              e.date,
-              e.hour,
-              e.actual_power,
-              e.supply_capacity,
-              p.predicted_power_kwh AS predicted_power,
+              base.date,
+              base.hour,
+              base.actual_power,
+              base.supply_capacity,
+              base.temperature_2m,
+              base.relative_humidity_2m,
+              base.precipitation,
+              base.weather_code,
+              base.day_of_week,
+              base.is_weekend,
+              base.is_holiday,
+              base.month,
 
-              -- 誤差計算（予測データがある場合のみ）
-              CASE
-                WHEN p.predicted_power_kwh IS NOT NULL AND e.actual_power IS NOT NULL
-                THEN ABS(p.predicted_power_kwh - e.actual_power)
-                ELSE NULL
-              END AS error_absolute,
+              -- 循環特徴量（時間の周期性）
+              SIN(2 * 3.141592653589793 * base.hour / 24) as hour_sin,
+              COS(2 * 3.141592653589793 * base.hour / 24) as hour_cos,
 
-              CASE
-                WHEN p.predicted_power_kwh IS NOT NULL AND e.actual_power IS NOT NULL AND e.actual_power > 0
-                THEN (ABS(p.predicted_power_kwh - e.actual_power) / e.actual_power) * 100
-                ELSE NULL
-              END AS error_percentage,
+              -- lag特徴量（予測で使用する3つ）
+              lag1.actual_power as lag_1_day,
+              lag7.actual_power as lag_7_day,
+              blag1.actual_power as lag_1_business_day
 
-              -- 天気データ
-              w.temperature_2m,
-              w.relative_humidity_2m,
-              w.precipitation,
-              w.weather_code,
-
-              -- カレンダー情報
-              c.day_of_week,
-              c.is_weekend,
-              c.is_holiday,
-
-              -- 使用率計算
-              CASE
-                WHEN e.supply_capacity > 0
-                THEN ROUND((e.actual_power / e.supply_capacity) * 100, 1)
-                ELSE NULL
-              END AS usage_rate,
-
-              -- 曜日日本語表記
-              CASE c.day_of_week
-                WHEN 'Monday' THEN '月'
-                WHEN 'Tuesday' THEN '火'
-                WHEN 'Wednesday' THEN '水'
-                WHEN 'Thursday' THEN '木'
-                WHEN 'Friday' THEN '金'
-                WHEN 'Saturday' THEN '土'
-                WHEN 'Sunday' THEN '日'
-                ELSE NULL
-              END AS weekday_jp
-
-            FROM latest_energy e
-
-            -- 最新の天気データを結合（重複なし）
-            LEFT JOIN latest_weather w
-              ON e.date = w.date
-              AND e.hour = CAST(w.hour AS INT64)
-              AND w.rn = 1
-
-            -- カレンダー情報を結合
-            LEFT JOIN `{self.project_id}.{self.dataset_id}.calendar_data` c
-              ON e.date = c.date
-
-            -- 最新の予測データを結合
-            LEFT JOIN latest_predictions p
-              ON e.date = p.prediction_date
-              AND e.hour = p.prediction_hour
-              AND p.rn = 1
-
-            WHERE e.rn = 1
+            FROM base_data base
+            LEFT JOIN `{self.project_id}.{self.dataset_id}.date_lag_mapping` dlm
+              ON base.date = dlm.base_date
+            LEFT JOIN base_data lag1
+              ON lag1.date = dlm.lag_1_day_date AND lag1.hour = base.hour
+            LEFT JOIN base_data lag7
+              ON lag7.date = dlm.lag_7_day_date AND lag7.hour = base.hour
+            LEFT JOIN base_data blag1
+              ON blag1.date = dlm.lag_1_business_date AND blag1.hour = base.hour
             """
 
             job = self.bq_client.query(insert_query)
             job.result()  # クエリ完了を待機
             inserted_rows = job.num_dml_affected_rows
 
-            print(f"ダッシュボードデータ投入完了: {inserted_rows}行")
+            print(f"ml_featuresデータ投入完了: {inserted_rows}行")
             return inserted_rows
 
         except Exception as e:
@@ -231,7 +173,7 @@ class DashboardDataUpdater:
         """
         # ローカルファイルに記録
         log_date = datetime.now().strftime('%Y-%m-%d')
-        log_file = self.log_dir / f"{log_date}_dashboard_update_execution.jsonl"
+        log_file = self.log_dir / f"{log_date}_ml_features_update_execution.jsonl"
 
         try:
             with open(log_file, 'a', encoding='utf-8') as f:
@@ -261,14 +203,13 @@ class DashboardDataUpdater:
 
             print(f"BigQuery書き込み失敗（ファイルには保存済み・エラーログ記録済み）: {e}")
 
-    def update_dashboard_data(self):
+    def update_ml_features(self):
         """
-        ダッシュボードデータ更新のメイン処理
+        ml_featuresテーブル更新のメイン処理
 
         処理フロー:
-        1. 今日以降のデータを全削除
-        2. 各テーブルからデータを統合取得
-        3. dashboard_dataに投入
+        1. 過去7日分のデータを削除
+        2. 過去7日分のデータを再投入
 
         Returns:
             dict: 処理結果
@@ -278,16 +219,16 @@ class DashboardDataUpdater:
         started_at = datetime.now()
         target_date_str = datetime.now().strftime('%Y-%m-%d')
 
-        print(f"ダッシュボードデータ更新開始: execution_id={execution_id}")
+        print(f"ml_features更新開始: execution_id={execution_id}")
 
         try:
-            # 1. 今日以降のデータ削除
-            deleted_rows = self.delete_future_data()
+            # 1. 過去7日分のデータ削除
+            deleted_rows = self.delete_recent_data()
 
-            # 2. BigQuery内で統合データを直接投入
-            inserted_rows = self.insert_dashboard_data_direct()
+            # 2. 過去7日分のデータを再投入
+            inserted_rows = self.insert_ml_features()
 
-            print(f"ダッシュボードデータ更新完了: 削除{deleted_rows}行, 挿入{inserted_rows}行")
+            print(f"ml_features更新完了: 削除{deleted_rows}行, 挿入{inserted_rows}行")
 
             # 成功ログ記録
             completed_at = datetime.now()
@@ -296,7 +237,7 @@ class DashboardDataUpdater:
             log_data = {
                 "execution_id": execution_id,
                 "date": target_date_str,
-                "process_type": "DASHBOARD_UPDATE",
+                "process_type": "ML_FEATURES_UPDATE",
                 "status": "SUCCESS",
                 "error_message": None,
                 "started_at": started_at.isoformat(),
@@ -313,13 +254,13 @@ class DashboardDataUpdater:
 
             return {
                 'status': 'success',
-                'message': f'ダッシュボードデータ更新成功',
+                'message': f'ml_features更新成功',
                 'deleted_rows': deleted_rows,
                 'inserted_rows': inserted_rows
             }
 
         except Exception as e:
-            print(f"ダッシュボードデータ更新失敗: {e}")
+            print(f"ml_features更新失敗: {e}")
 
             # 失敗ログ記録
             completed_at = datetime.now()
@@ -328,7 +269,7 @@ class DashboardDataUpdater:
             log_data = {
                 "execution_id": execution_id,
                 "date": target_date_str,
-                "process_type": "DASHBOARD_UPDATE",
+                "process_type": "ML_FEATURES_UPDATE",
                 "status": "FAILED",
                 "error_message": str(e),
                 "started_at": started_at.isoformat(),
@@ -351,7 +292,7 @@ class DashboardDataUpdater:
 def print_update_results(results):
     """更新結果を表示"""
     print(f"\n{'='*60}")
-    print("ダッシュボードデータ更新結果")
+    print("ml_features更新結果")
     print('='*60)
 
     status_mark = '成功' if results['status'] == 'success' else '失敗'
@@ -365,11 +306,11 @@ def print_update_results(results):
 
 def main():
     """メイン関数"""
-    print("ダッシュボードデータ更新システム開始")
+    print("ml_features更新システム開始")
 
     # 更新処理実行
-    updater = DashboardDataUpdater()
-    results = updater.update_dashboard_data()
+    updater = MLFeaturesUpdater()
+    results = updater.update_ml_features()
 
     # 結果表示
     print_update_results(results)
