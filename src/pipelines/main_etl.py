@@ -4,9 +4,10 @@
 日次自動実行用：
 1. 電力データ（過去5日分）取得・BigQuery投入
 2. 気象データ（過去10日+予測14日）取得・BigQuery投入
-3. データ品質チェック（直近7日分）
-4. 予測実行（今日から14日間）・CSV/BigQuery保存
-5. ダッシュボードデータ更新（Looker Studio用統合テーブル）
+3. ml_features更新（過去7日分の学習データ再構築）
+4. データ品質チェック（直近7日分）
+5. 予測実行（今日から14日間）・CSV/BigQuery保存
+6. ダッシュボードデータ更新（Looker Studio用統合テーブル）
 
 実行方法:
     python -m src.pipelines.main_etl
@@ -16,6 +17,7 @@ Note:
     - 電力データ: src.data_processing.data_downloader
     - 気象データ: src.data_processing.weather_downloader
     - BQ投入: src.data_processing.power_bigquery_loader, weather_bigquery_loader
+    - ml_features更新: src.data_processing.ml_features_updater
     - 品質チェック: src.monitoring.data_quality_checker
     - 予測実行: src.prediction.prediction_iterative_with_export
     - ダッシュボード更新: src.data_processing.dashboard_data_updater
@@ -27,10 +29,11 @@ import sys
 
 def main():
     """メイン関数 - 日次ETLパイプライン実行（CLI実行方式）"""
-    print("メインETLパイプライン開始（電力+気象+品質チェック+予測+ダッシュボード更新統合版）")
+    print("メインETLパイプライン開始（電力+気象+ml_features+品質チェック+予測+ダッシュボード更新統合版）")
     print("処理内容:")
     print("  - 電力データ（過去5日分）取得・BQ投入")
     print("  - 気象データ（過去10日+予測14日）取得・BQ投入")
+    print("  - ml_features更新（過去7日分の学習データ再構築）")
     print("  - データ品質チェック（直近7日分）")
     print("  - 予測実行（今日から14日間）・結果保存")
     print("  - ダッシュボードデータ更新（Looker Studio用）")
@@ -76,27 +79,35 @@ def main():
         sys.exit(1)
     print()
 
-    # Phase 5: データ品質チェック
-    print("Phase 5: データ品質チェック（直近7日分）")
+    # Phase 5: ml_features更新
+    print("Phase 5: ml_features更新（過去7日分の学習データ再構築）")
+    result = subprocess.run(['python', '-m', 'src.data_processing.ml_features_updater'])
+    if result.returncode != 0:
+        print("Phase 5 失敗: ml_features更新エラー")
+        sys.exit(1)
+    print()
+
+    # Phase 6: データ品質チェック
+    print("Phase 6: データ品質チェック（直近7日分）")
     result = subprocess.run(['python', '-m', 'src.monitoring.data_quality_checker', '--days', '7'])
     if result.returncode != 0:
-        print("Phase 5 失敗: データ品質チェックエラー")
+        print("Phase 6 失敗: データ品質チェックエラー")
         sys.exit(1)
     print()
 
-    # Phase 6: 予測実行
-    print("Phase 6: 予測実行（今日から14日間）")
+    # Phase 7: 予測実行
+    print("Phase 7: 予測実行（今日から14日間）")
     result = subprocess.run(['python', '-m', 'src.prediction.prediction_iterative_with_export'])
     if result.returncode != 0:
-        print("Phase 6 失敗: 予測実行エラー")
+        print("Phase 7 失敗: 予測実行エラー")
         sys.exit(1)
     print()
 
-    # Phase 7: ダッシュボードデータ更新
-    print("Phase 7: ダッシュボードデータ更新（Looker Studio用）")
+    # Phase 8: ダッシュボードデータ更新
+    print("Phase 8: ダッシュボードデータ更新（Looker Studio用）")
     result = subprocess.run(['python', '-m', 'src.data_processing.dashboard_data_updater'])
     if result.returncode != 0:
-        print("Phase 7 失敗: ダッシュボードデータ更新エラー")
+        print("Phase 8 失敗: ダッシュボードデータ更新エラー")
         sys.exit(1)
     print()
 

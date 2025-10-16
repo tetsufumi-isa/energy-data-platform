@@ -28,7 +28,7 @@ WITH base_data AS (
   LEFT JOIN `energy-env.prod_energy_data.weather_data` weather
     ON energy.date = weather.date
     AND energy.hour = CAST(weather.hour AS INTEGER)
-    AND weather.prefecture = 'chiba'
+    AND weather.prefecture = '千葉県'
   LEFT JOIN `energy-env.prod_energy_data.calendar_data` calendar
     ON energy.date = calendar.date
 )

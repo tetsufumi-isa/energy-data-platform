@@ -1,11 +1,11 @@
 """
-ml_featuresテーブル差分更新モジュール
+prediction_accuracyテーブル更新モジュール
 
-電力・天気データ投入後に実行し、ml_featuresテーブルを最新化する。
+予測値と実績値を紐付けて精度分析用テーブルを更新する。
 過去7日分を削除→再投入する方式で効率的に更新。
 
 実行方法:
-    python -m src.data_processing.ml_features_updater
+    python -m src.data_processing.prediction_accuracy_updater
 """
 
 import json
@@ -16,8 +16,8 @@ from pathlib import Path
 from google.cloud import bigquery
 
 
-class MLFeaturesUpdater:
-    """ml_features差分更新クラス"""
+class PredictionAccuracyUpdater:
+    """prediction_accuracy更新クラス"""
 
     def __init__(self, project_id="energy-env"):
         """
@@ -28,7 +28,7 @@ class MLFeaturesUpdater:
         """
         self.project_id = project_id
         self.dataset_id = "prod_energy_data"
-        self.table_id = "ml_features"
+        self.table_id = "prediction_accuracy"
 
         # 環境変数チェック
         energy_env_path = os.getenv('ENERGY_ENV_PATH')
@@ -36,7 +36,7 @@ class MLFeaturesUpdater:
             raise ValueError("ENERGY_ENV_PATH環境変数が設定されていません")
 
         # ログディレクトリ設定
-        self.log_dir = Path(energy_env_path) / 'logs' / 'ml_features_updater'
+        self.log_dir = Path(energy_env_path) / 'logs' / 'prediction_accuracy_updater'
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # BigQueryクライアント初期化
@@ -45,7 +45,7 @@ class MLFeaturesUpdater:
         # BQログテーブル設定
         self.bq_log_table_id = f"{self.project_id}.{self.dataset_id}.process_execution_log"
 
-        print(f"MLFeaturesUpdater初期化完了: {project_id}")
+        print(f"PredictionAccuracyUpdater初期化完了: {project_id}")
 
     def delete_recent_data(self):
         """
@@ -60,7 +60,7 @@ class MLFeaturesUpdater:
         try:
             delete_query = f"""
             DELETE FROM `{self.project_id}.{self.dataset_id}.{self.table_id}`
-            WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
+            WHERE prediction_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
             """
 
             job = self.bq_client.query(delete_query)
@@ -75,10 +75,10 @@ class MLFeaturesUpdater:
             print(error_msg)
             raise Exception(error_msg)
 
-    def insert_ml_features(self):
+    def insert_prediction_accuracy(self):
         """
-        過去7日分のml_featuresデータを再投入
-        create_ml_features_table.sqlのロジックを流用
+        過去7日分のprediction_accuracyデータを再投入
+        prediction_resultsとenergy_data_hourlyをJOINして精度計算
 
         Returns:
             int: 投入行数
@@ -89,111 +89,60 @@ class MLFeaturesUpdater:
         try:
             insert_query = f"""
             INSERT INTO `{self.project_id}.{self.dataset_id}.{self.table_id}` (
-                date, hour, actual_power, supply_capacity,
-                temperature_2m, relative_humidity_2m, precipitation, weather_code,
-                day_of_week, is_weekend, is_holiday, month,
-                hour_sin, hour_cos,
-                lag_1_day, lag_7_day, lag_1_business_day
+                execution_id,
+                prediction_run_date,
+                prediction_date,
+                prediction_hour,
+                predicted_power,
+                actual_power,
+                error_absolute,
+                error_percentage,
+                days_ahead,
+                created_at
             )
-            WITH energy_filtered AS (
+            WITH prediction_filtered AS (
+              SELECT
+                execution_id,
+                DATE(created_at, 'Asia/Tokyo') AS prediction_run_date,
+                prediction_date,
+                prediction_hour,
+                predicted_power_kwh AS predicted_power,
+                created_at
+              FROM `{self.project_id}.{self.dataset_id}.prediction_results`
+              WHERE prediction_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
+                AND prediction_date < CURRENT_DATE('Asia/Tokyo')
+            ),
+            energy_filtered AS (
               SELECT
                 date,
                 hour,
-                actual_power,
-                supply_capacity
+                actual_power
               FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
               WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
-            ),
-            weather_filtered AS (
-              SELECT
-                date,
-                hour,
-                temperature_2m,
-                relative_humidity_2m,
-                precipitation,
-                weather_code
-              FROM `{self.project_id}.{self.dataset_id}.weather_data`
-              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
-                AND prefecture = '千葉県'
-            ),
-            calendar_filtered AS (
-              SELECT
-                date,
-                day_of_week,
-                is_weekend,
-                is_holiday
-              FROM `{self.project_id}.{self.dataset_id}.calendar_data`
-              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
-            ),
-            lag_mapping_filtered AS (
-              SELECT
-                base_date,
-                lag_1_day_date,
-                lag_7_day_date,
-                lag_1_business_date
-              FROM `{self.project_id}.{self.dataset_id}.date_lag_mapping`
-              WHERE base_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
-            ),
-            base_data AS (
-              SELECT
-                energy.date,
-                energy.hour,
-                energy.actual_power,
-                energy.supply_capacity,
-                weather.temperature_2m,
-                weather.relative_humidity_2m,
-                weather.precipitation,
-                weather.weather_code,
-                calendar.day_of_week,
-                calendar.is_weekend,
-                calendar.is_holiday,
-                EXTRACT(MONTH FROM energy.date) as month
-              FROM energy_filtered energy
-              LEFT JOIN weather_filtered weather
-                ON energy.date = weather.date
-                AND energy.hour = CAST(weather.hour AS INT64)
-              LEFT JOIN calendar_filtered calendar
-                ON energy.date = calendar.date
+                AND date < CURRENT_DATE('Asia/Tokyo')
             )
             SELECT
-              base.date,
-              base.hour,
-              base.actual_power,
-              base.supply_capacity,
-              base.temperature_2m,
-              base.relative_humidity_2m,
-              base.precipitation,
-              base.weather_code,
-              base.day_of_week,
-              base.is_weekend,
-              base.is_holiday,
-              base.month,
-
-              -- 循環特徴量（時間の周期性）
-              SIN(2 * 3.141592653589793 * base.hour / 24) as hour_sin,
-              COS(2 * 3.141592653589793 * base.hour / 24) as hour_cos,
-
-              -- lag特徴量（予測で使用する3つ）
-              lag1.actual_power as lag_1_day,
-              lag7.actual_power as lag_7_day,
-              blag1.actual_power as lag_1_business_day
-
-            FROM base_data base
-            LEFT JOIN lag_mapping_filtered dlm
-              ON base.date = dlm.base_date
-            LEFT JOIN base_data lag1
-              ON lag1.date = dlm.lag_1_day_date AND lag1.hour = base.hour
-            LEFT JOIN base_data lag7
-              ON lag7.date = dlm.lag_7_day_date AND lag7.hour = base.hour
-            LEFT JOIN base_data blag1
-              ON blag1.date = dlm.lag_1_business_date AND blag1.hour = base.hour
+              pred.execution_id,
+              pred.prediction_run_date,
+              pred.prediction_date,
+              pred.prediction_hour,
+              pred.predicted_power,
+              energy.actual_power,
+              ABS(pred.predicted_power - energy.actual_power) AS error_absolute,
+              ABS(pred.predicted_power - energy.actual_power) / NULLIF(energy.actual_power, 0) * 100 AS error_percentage,
+              DATE_DIFF(pred.prediction_date, pred.prediction_run_date, DAY) AS days_ahead,
+              CURRENT_TIMESTAMP() AS created_at
+            FROM prediction_filtered pred
+            INNER JOIN energy_filtered energy
+              ON pred.prediction_date = energy.date
+              AND pred.prediction_hour = energy.hour
             """
 
             job = self.bq_client.query(insert_query)
             job.result()  # クエリ完了を待機
             inserted_rows = job.num_dml_affected_rows
 
-            print(f"ml_featuresデータ投入完了: {inserted_rows}行")
+            print(f"prediction_accuracyデータ投入完了: {inserted_rows}行")
             return inserted_rows
 
         except Exception as e:
@@ -210,7 +159,7 @@ class MLFeaturesUpdater:
         """
         # ローカルファイルに記録
         log_date = datetime.now().strftime('%Y-%m-%d')
-        log_file = self.log_dir / f"{log_date}_ml_features_update_execution.jsonl"
+        log_file = self.log_dir / f"{log_date}_prediction_accuracy_update_execution.jsonl"
 
         try:
             with open(log_file, 'a', encoding='utf-8') as f:
@@ -240,13 +189,13 @@ class MLFeaturesUpdater:
 
             print(f"BigQuery書き込み失敗（ファイルには保存済み・エラーログ記録済み）: {e}")
 
-    def update_ml_features(self):
+    def update_prediction_accuracy(self):
         """
-        ml_featuresテーブル更新のメイン処理
+        prediction_accuracyテーブル更新のメイン処理
 
         処理フロー:
         1. 過去7日分のデータを削除
-        2. 過去7日分のデータを再投入
+        2. 過去7日分の予測値+実績値をJOINして再投入
 
         Returns:
             dict: 処理結果
@@ -256,16 +205,16 @@ class MLFeaturesUpdater:
         started_at = datetime.now()
         target_date_str = datetime.now().strftime('%Y-%m-%d')
 
-        print(f"ml_features更新開始: execution_id={execution_id}")
+        print(f"prediction_accuracy更新開始: execution_id={execution_id}")
 
         try:
             # 1. 過去7日分のデータ削除
             deleted_rows = self.delete_recent_data()
 
             # 2. 過去7日分のデータを再投入
-            inserted_rows = self.insert_ml_features()
+            inserted_rows = self.insert_prediction_accuracy()
 
-            print(f"ml_features更新完了: 削除{deleted_rows}行, 挿入{inserted_rows}行")
+            print(f"prediction_accuracy更新完了: 削除{deleted_rows}行, 挿入{inserted_rows}行")
 
             # 成功ログ記録
             completed_at = datetime.now()
@@ -274,7 +223,7 @@ class MLFeaturesUpdater:
             log_data = {
                 "execution_id": execution_id,
                 "date": target_date_str,
-                "process_type": "ML_FEATURES_UPDATE",
+                "process_type": "PREDICTION_ACCURACY_UPDATE",
                 "status": "SUCCESS",
                 "error_message": None,
                 "started_at": started_at.isoformat(),
@@ -291,13 +240,13 @@ class MLFeaturesUpdater:
 
             return {
                 'status': 'success',
-                'message': f'ml_features更新成功',
+                'message': f'prediction_accuracy更新成功',
                 'deleted_rows': deleted_rows,
                 'inserted_rows': inserted_rows
             }
 
         except Exception as e:
-            print(f"ml_features更新失敗: {e}")
+            print(f"prediction_accuracy更新失敗: {e}")
 
             # 失敗ログ記録
             completed_at = datetime.now()
@@ -306,7 +255,7 @@ class MLFeaturesUpdater:
             log_data = {
                 "execution_id": execution_id,
                 "date": target_date_str,
-                "process_type": "ML_FEATURES_UPDATE",
+                "process_type": "PREDICTION_ACCURACY_UPDATE",
                 "status": "FAILED",
                 "error_message": str(e),
                 "started_at": started_at.isoformat(),
@@ -329,7 +278,7 @@ class MLFeaturesUpdater:
 def print_update_results(results):
     """更新結果を表示"""
     print(f"\n{'='*60}")
-    print("ml_features更新結果")
+    print("prediction_accuracy更新結果")
     print('='*60)
 
     status_mark = '成功' if results['status'] == 'success' else '失敗'
@@ -343,11 +292,11 @@ def print_update_results(results):
 
 def main():
     """メイン関数"""
-    print("ml_features更新システム開始")
+    print("prediction_accuracy更新システム開始")
 
     # 更新処理実行
-    updater = MLFeaturesUpdater()
-    results = updater.update_ml_features()
+    updater = PredictionAccuracyUpdater()
+    results = updater.update_prediction_accuracy()
 
     # 結果表示
     print_update_results(results)
