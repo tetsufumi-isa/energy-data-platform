@@ -61,6 +61,7 @@ class PredictionAccuracyUpdater:
             delete_query = f"""
             DELETE FROM `{self.project_id}.{self.dataset_id}.{self.table_id}`
             WHERE prediction_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
+              AND prediction_date < CURRENT_DATE('Asia/Tokyo')
             """
 
             job = self.bq_client.query(delete_query)
@@ -110,7 +111,7 @@ class PredictionAccuracyUpdater:
                 created_at
               FROM `{self.project_id}.{self.dataset_id}.prediction_results`
               WHERE prediction_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
-                AND prediction_date < CURRENT_DATE('Asia/Tokyo')
+                AND prediction_date < CURRENT_DATE('Asia/Tokyo')  -- 実績確定済みデータのみ（今日は除外）
             ),
             energy_filtered AS (
               SELECT
