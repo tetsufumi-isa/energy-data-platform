@@ -81,6 +81,9 @@ class MLFeaturesUpdater:
         過去7日分のml_featuresデータを再投入
         create_ml_features_table.sqlのロジックを流用
 
+        lag特徴量計算のため、電力データは20日前から取得し、
+        最後に7日分に絞ってインサートする
+
         Returns:
             int: 投入行数
 
@@ -97,15 +100,17 @@ class MLFeaturesUpdater:
                 lag_1_day, lag_7_day, lag_1_business_day
             )
             WITH energy_filtered AS (
+              -- lag特徴量計算のため20日分取得
               SELECT
                 date,
                 hour,
                 actual_power,
                 supply_capacity
               FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
-              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
+              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 20 DAY)
             ),
             weather_filtered AS (
+              -- 天気データは7日分でOK
               SELECT
                 date,
                 hour,
@@ -118,6 +123,7 @@ class MLFeaturesUpdater:
                 AND prefecture = '千葉県'
             ),
             calendar_filtered AS (
+              -- カレンダーデータは7日分でOK
               SELECT
                 date,
                 day_of_week,
@@ -127,6 +133,7 @@ class MLFeaturesUpdater:
               WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
             ),
             lag_mapping_filtered AS (
+              -- base_dateが7日分あれば、lag日付カラムで過去日付を参照可能
               SELECT
                 base_date,
                 lag_1_day_date,
@@ -135,12 +142,36 @@ class MLFeaturesUpdater:
               FROM `{self.project_id}.{self.dataset_id}.date_lag_mapping`
               WHERE base_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
             ),
-            base_data AS (
+            energy_with_lag AS (
+              -- 電力データに先にlag特徴量を追加
               SELECT
                 energy.date,
                 energy.hour,
                 energy.actual_power,
                 energy.supply_capacity,
+                lag1.actual_power as lag_1_day,
+                lag7.actual_power as lag_7_day,
+                blag1.actual_power as lag_1_business_day
+              FROM energy_filtered energy
+              LEFT JOIN lag_mapping_filtered dlm
+                ON energy.date = dlm.base_date
+              LEFT JOIN energy_filtered lag1
+                ON lag1.date = dlm.lag_1_day_date AND lag1.hour = energy.hour
+              LEFT JOIN energy_filtered lag7
+                ON lag7.date = dlm.lag_7_day_date AND lag7.hour = energy.hour
+              LEFT JOIN energy_filtered blag1
+                ON blag1.date = dlm.lag_1_business_date AND blag1.hour = energy.hour
+            ),
+            base_data AS (
+              -- 電力+lag特徴量に天気・カレンダーをjoin（7日分に絞る）
+              SELECT
+                energy.date,
+                energy.hour,
+                energy.actual_power,
+                energy.supply_capacity,
+                energy.lag_1_day,
+                energy.lag_7_day,
+                energy.lag_1_business_day,
                 weather.temperature_2m,
                 weather.relative_humidity_2m,
                 weather.precipitation,
@@ -149,12 +180,13 @@ class MLFeaturesUpdater:
                 calendar.is_weekend,
                 calendar.is_holiday,
                 EXTRACT(MONTH FROM energy.date) as month
-              FROM energy_filtered energy
+              FROM energy_with_lag energy
               LEFT JOIN weather_filtered weather
                 ON energy.date = weather.date
                 AND energy.hour = CAST(weather.hour AS INT64)
               LEFT JOIN calendar_filtered calendar
                 ON energy.date = calendar.date
+              WHERE energy.date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
             )
             SELECT
               base.date,
@@ -174,20 +206,12 @@ class MLFeaturesUpdater:
               SIN(2 * 3.141592653589793 * base.hour / 24) as hour_sin,
               COS(2 * 3.141592653589793 * base.hour / 24) as hour_cos,
 
-              -- lag特徴量（予測で使用する3つ）
-              lag1.actual_power as lag_1_day,
-              lag7.actual_power as lag_7_day,
-              blag1.actual_power as lag_1_business_day
+              -- lag特徴量（電力データで事前計算済み）
+              base.lag_1_day,
+              base.lag_7_day,
+              base.lag_1_business_day
 
             FROM base_data base
-            LEFT JOIN lag_mapping_filtered dlm
-              ON base.date = dlm.base_date
-            LEFT JOIN base_data lag1
-              ON lag1.date = dlm.lag_1_day_date AND lag1.hour = base.hour
-            LEFT JOIN base_data lag7
-              ON lag7.date = dlm.lag_7_day_date AND lag7.hour = base.hour
-            LEFT JOIN base_data blag1
-              ON blag1.date = dlm.lag_1_business_date AND blag1.hour = base.hour
             """
 
             job = self.bq_client.query(insert_query)
