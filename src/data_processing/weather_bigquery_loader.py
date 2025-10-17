@@ -12,6 +12,7 @@ import json
 import os
 import uuid
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from google.cloud import bigquery
 
@@ -108,7 +109,7 @@ class WeatherBigQueryLoader:
                 'relative_humidity_2m': humidity[i],
                 'precipitation': precip[i],
                 'weather_code': weather_codes[i],
-                'created_at': datetime.now().isoformat()
+                'created_at': datetime.now(ZoneInfo('Asia/Tokyo')).isoformat()
             }
             rows.append(row)
 
@@ -173,7 +174,7 @@ class WeatherBigQueryLoader:
             log_data (dict): ログデータ
         """
         # ローカルファイルに記録（実行日の日付を使用）
-        log_date = datetime.now().strftime('%Y-%m-%d')
+        log_date = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
         log_file = self.log_dir / f"{log_date}_weather_bq_load_execution.jsonl"
 
         try:
@@ -190,7 +191,7 @@ class WeatherBigQueryLoader:
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(ZoneInfo('Asia/Tokyo')).isoformat(),
                 'error_type': 'BQ_INSERT_FAILED',
                 'error_message': str(e),
                 'original_log_data': log_data
@@ -218,7 +219,7 @@ class WeatherBigQueryLoader:
         """
         # 実行ID・開始時刻記録
         execution_id = str(uuid.uuid4())
-        started_at = datetime.now()
+        started_at = datetime.now(ZoneInfo('Asia/Tokyo'))
         target_date_str = target_date if target_date else started_at.strftime('%Y-%m-%d')
 
         print(f"気象データBQ投入開始: {data_type}, 対象日: {target_date_str}, execution_id={execution_id}")
@@ -232,7 +233,7 @@ class WeatherBigQueryLoader:
             else:
                 # 従来の日付ベース命名規則
                 if target_date is None:
-                    dt = datetime.now()
+                    dt = datetime.now(ZoneInfo('Asia/Tokyo'))
                 else:
                     dt = datetime.strptime(target_date, '%Y-%m-%d')
 
@@ -269,7 +270,7 @@ class WeatherBigQueryLoader:
             print(f"気象データBQ投入完了: 1ファイル, {rows_inserted}行")
 
             # 成功ログ記録
-            completed_at = datetime.now()
+            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             duration_seconds = int((completed_at - started_at).total_seconds())
 
             log_data = {
@@ -301,7 +302,7 @@ class WeatherBigQueryLoader:
             print(f"気象データBQ投入失敗: {e}")
 
             # 失敗ログ記録
-            completed_at = datetime.now()
+            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             duration_seconds = int((completed_at - started_at).total_seconds())
 
             log_data = {

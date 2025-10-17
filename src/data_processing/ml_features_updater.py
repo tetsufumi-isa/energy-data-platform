@@ -12,6 +12,7 @@ import json
 import os
 import uuid
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from google.cloud import bigquery
 
@@ -209,7 +210,7 @@ class MLFeaturesUpdater:
             log_data (dict): ログデータ
         """
         # ローカルファイルに記録
-        log_date = datetime.now().strftime('%Y-%m-%d')
+        log_date = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
         log_file = self.log_dir / f"{log_date}_ml_features_update_execution.jsonl"
 
         try:
@@ -226,7 +227,7 @@ class MLFeaturesUpdater:
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(ZoneInfo('Asia/Tokyo')).isoformat(),
                 'error_type': 'BQ_INSERT_FAILED',
                 'error_message': str(e),
                 'original_log_data': log_data
@@ -253,8 +254,8 @@ class MLFeaturesUpdater:
         """
         # 実行ID・開始時刻記録
         execution_id = str(uuid.uuid4())
-        started_at = datetime.now()
-        target_date_str = datetime.now().strftime('%Y-%m-%d')
+        started_at = datetime.now(ZoneInfo('Asia/Tokyo'))
+        target_date_str = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
 
         print(f"ml_features更新開始: execution_id={execution_id}")
 
@@ -268,7 +269,7 @@ class MLFeaturesUpdater:
             print(f"ml_features更新完了: 削除{deleted_rows}行, 挿入{inserted_rows}行")
 
             # 成功ログ記録
-            completed_at = datetime.now()
+            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             duration_seconds = int((completed_at - started_at).total_seconds())
 
             log_data = {
@@ -300,7 +301,7 @@ class MLFeaturesUpdater:
             print(f"ml_features更新失敗: {e}")
 
             # 失敗ログ記録
-            completed_at = datetime.now()
+            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             duration_seconds = int((completed_at - started_at).total_seconds())
 
             log_data = {

@@ -30,6 +30,7 @@ import argparse
 import time
 import uuid
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from google.cloud import bigquery
 
@@ -90,7 +91,7 @@ class WeatherDownloader:
             log_data (dict): ログデータ
         """
         # ローカルファイルに記録（実行日の日付を使用）
-        log_date = datetime.now().strftime('%Y-%m-%d')
+        log_date = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
         log_file = self.log_dir / f"{log_date}_weather_execution.jsonl"
 
         try:
@@ -107,7 +108,7 @@ class WeatherDownloader:
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(ZoneInfo('Asia/Tokyo')).isoformat(),
                 'error_type': 'BQ_INSERT_FAILED',
                 'error_message': str(e),
                 'original_log_data': log_data
@@ -317,12 +318,12 @@ class WeatherDownloader:
         Returns:
             dict: ダウンロード結果
         """
-        today = datetime.now()
-        
+        today = datetime.now(ZoneInfo('Asia/Tokyo'))
+
         if target_date is None:
             # ケース1: 基準日無し（日次自動実行用）
             execution_id = str(uuid.uuid4())
-            started_at = datetime.now()
+            started_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             target_date_str = started_at.strftime('%Y-%m-%d')
 
             print("日次自動実行モード: 過去データ(10日前～3日前) + 予測データ(14日間)")
@@ -385,7 +386,7 @@ class WeatherDownloader:
                 })
                 
                 # 成功ログ記録
-                completed_at = datetime.now()
+                completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
                 duration_seconds = int((completed_at - started_at).total_seconds())
                 total_data_points = sum([item['data_points'] for item in results['historical']]) + \
                                    sum([item['data_points'] for item in results['forecast']])
@@ -416,7 +417,7 @@ class WeatherDownloader:
 
             except Exception as e:
                 # エラーログ記録
-                completed_at = datetime.now()
+                completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
                 duration_seconds = int((completed_at - started_at).total_seconds())
 
                 log_data = {
@@ -451,7 +452,7 @@ class WeatherDownloader:
                 raise ValueError(f"日付形式が不正です。YYYY-MM-DD形式を使用してください。")
 
             execution_id = str(uuid.uuid4())
-            started_at = datetime.now()
+            started_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             target_date_str = target_date
 
             print(f"過去データ分析モード: {target_date} から30日前まで")
@@ -493,7 +494,7 @@ class WeatherDownloader:
                 })
                 
                 # 成功ログ記録
-                completed_at = datetime.now()
+                completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
                 duration_seconds = int((completed_at - started_at).total_seconds())
                 total_data_points = sum([item['data_points'] for item in results['historical']])
 
@@ -521,7 +522,7 @@ class WeatherDownloader:
 
             except Exception as e:
                 # エラーログ記録
-                completed_at = datetime.now()
+                completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
                 duration_seconds = int((completed_at - started_at).total_seconds())
 
                 log_data = {
@@ -569,7 +570,7 @@ class WeatherDownloader:
             raise ValueError(f"開始日が終了日より後になっています: {start_date} > {end_date}")
 
         execution_id = str(uuid.uuid4())
-        started_at = datetime.now()
+        started_at = datetime.now(ZoneInfo('Asia/Tokyo'))
         target_date_str = start_date
 
         print(f"期間指定取得モード: {start_date} ～ {end_date}")
@@ -608,7 +609,7 @@ class WeatherDownloader:
             })
 
             # 成功ログ記録
-            completed_at = datetime.now()
+            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             duration_seconds = int((completed_at - started_at).total_seconds())
             total_data_points = sum([item['data_points'] for item in results['historical']])
 
@@ -636,7 +637,7 @@ class WeatherDownloader:
 
         except Exception as e:
             # エラーログ記録
-            completed_at = datetime.now()
+            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             duration_seconds = int((completed_at - started_at).total_seconds())
 
             log_data = {
@@ -688,7 +689,7 @@ class WeatherDownloader:
         end_date = f"{year:04d}-{month:02d}-{last_day:02d}"
 
         execution_id = str(uuid.uuid4())
-        started_at = datetime.now()
+        started_at = datetime.now(ZoneInfo('Asia/Tokyo'))
         target_date_str = start_date
 
         print(f"月指定取得モード: {yyyymm} ({start_date} ～ {end_date})")
@@ -723,7 +724,7 @@ class WeatherDownloader:
             })
 
             # 成功ログ記録
-            completed_at = datetime.now()
+            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             duration_seconds = int((completed_at - started_at).total_seconds())
             total_data_points = sum([item['data_points'] for item in results['historical']])
 
@@ -752,7 +753,7 @@ class WeatherDownloader:
 
         except Exception as e:
             # エラーログ記録
-            completed_at = datetime.now()
+            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
             duration_seconds = int((completed_at - started_at).total_seconds())
 
             log_data = {
@@ -868,7 +869,7 @@ def main():
 
         else:
             # 日次自動実行モード
-            today = datetime.now()
+            today = datetime.now(ZoneInfo('Asia/Tokyo'))
             historical_start = (today - timedelta(days=10)).strftime('%Y-%m-%d')
             historical_end = (today - timedelta(days=3)).strftime('%Y-%m-%d')
             print(f"日次自動実行モード")
