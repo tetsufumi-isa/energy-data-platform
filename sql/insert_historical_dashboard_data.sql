@@ -82,7 +82,7 @@ SELECT
     ELSE NULL
   END AS weekday_jp,
 
-  CURRENT_TIMESTAMP() AS created_at
+  CURRENT_DATETIME('Asia/Tokyo') AS created_at
 
 FROM `prod_energy_data.energy_data_hourly` e
 

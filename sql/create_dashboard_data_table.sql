@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS `prod_energy_data.dashboard_data` (
   weekday_jp STRING,
 
   -- メタデータ
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+  created_at DATETIME
 )
 PARTITION BY date
 CLUSTER BY hour

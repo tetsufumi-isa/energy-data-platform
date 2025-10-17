@@ -105,7 +105,7 @@ class PredictionAccuracyUpdater:
             WITH prediction_filtered AS (
               SELECT
                 execution_id,
-                DATE(created_at, 'Asia/Tokyo') AS prediction_run_date,
+                DATE(created_at) AS prediction_run_date,
                 prediction_date,
                 prediction_hour,
                 predicted_power_kwh AS predicted_power,
@@ -133,7 +133,7 @@ class PredictionAccuracyUpdater:
               ABS(pred.predicted_power - energy.actual_power) AS error_absolute,
               ABS(pred.predicted_power - energy.actual_power) / NULLIF(energy.actual_power, 0) * 100 AS error_percentage,
               DATE_DIFF(pred.prediction_date, pred.prediction_run_date, DAY) AS days_ahead,
-              CURRENT_TIMESTAMP('Asia/Tokyo') AS created_at
+              CURRENT_DATETIME('Asia/Tokyo') AS created_at
             FROM prediction_filtered pred
             INNER JOIN energy_filtered energy
               ON pred.prediction_date = energy.date
@@ -228,8 +228,8 @@ class PredictionAccuracyUpdater:
                 "process_type": "PREDICTION_ACCURACY_UPDATE",
                 "status": "SUCCESS",
                 "error_message": None,
-                "started_at": started_at.isoformat(),
-                "completed_at": completed_at.isoformat(),
+                "started_at": started_at.replace(tzinfo=None).isoformat(),
+                "completed_at": completed_at.replace(tzinfo=None).isoformat(),
                 "duration_seconds": duration_seconds,
                 "records_processed": inserted_rows,
                 "file_size_mb": None,
@@ -260,8 +260,8 @@ class PredictionAccuracyUpdater:
                 "process_type": "PREDICTION_ACCURACY_UPDATE",
                 "status": "FAILED",
                 "error_message": str(e),
-                "started_at": started_at.isoformat(),
-                "completed_at": completed_at.isoformat(),
+                "started_at": started_at.replace(tzinfo=None).isoformat(),
+                "completed_at": completed_at.replace(tzinfo=None).isoformat(),
                 "duration_seconds": duration_seconds,
                 "records_processed": None,
                 "file_size_mb": None,

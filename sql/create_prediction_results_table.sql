@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS `prod_energy_data.prediction_results` (
   prediction_date DATE NOT NULL,       -- 予測対象日
   prediction_hour INT64 NOT NULL,      -- 予測対象時間（0-23）
   predicted_power_kwh FLOAT64 NOT NULL,-- 予測電力量（kWh）
-  created_at TIMESTAMP NOT NULL        -- レコード作成日時
+  created_at DATETIME NOT NULL         -- レコード作成日時
 )
 PARTITION BY prediction_date
 CLUSTER BY execution_id, prediction_hour

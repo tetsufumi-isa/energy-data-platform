@@ -8,8 +8,8 @@ CREATE TABLE IF NOT EXISTS `energy-env.prod_energy_data.process_execution_log` (
   process_type STRING NOT NULL,              -- 'TEPCO_API', 'WEATHER_API', 'BQ_PROCESSING', 'ML_PREDICTION'
   status STRING NOT NULL,                    -- 'SUCCESS', 'FAILED'
   error_message STRING,                      -- エラーメッセージ（成功時はNULL）
-  started_at TIMESTAMP NOT NULL,             -- プロセス開始時刻
-  completed_at TIMESTAMP,                    -- プロセス完了時刻（実行中はNULL）
+  started_at DATETIME NOT NULL,              -- プロセス開始時刻
+  completed_at DATETIME,                     -- プロセス完了時刻（実行中はNULL）
   duration_seconds INT,                      -- 処理時間（秒）
   records_processed INT,                     -- 処理レコード数
   file_size_mb FLOAT64,                        -- ファイルサイズ（MB、API_DOWNLOADのみ）
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS `energy-env.prod_energy_data.data_anomaly_log` (
   anomaly_type STRING NOT NULL,              -- 'MISSING_DATA', 'OUTLIER', 'PATTERN_BREAK'
   severity STRING NOT NULL,                  -- 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
   affected_records INT,                      -- 影響を受けたレコード数
-  detected_at TIMESTAMP NOT NULL
+  detected_at DATETIME NOT NULL
 )
 PARTITION BY date
 OPTIONS (

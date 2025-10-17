@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS `prod_energy_data.prediction_accuracy` (
   days_ahead INT64,                    -- 何日後の予測か（0～13: 0=当日、1=翌日、...、13=13日後）
 
   -- メタデータ
-  created_at TIMESTAMP NOT NULL        -- レコード作成日時
+  created_at DATETIME NOT NULL         -- レコード作成日時
 )
 PARTITION BY prediction_date
 CLUSTER BY prediction_run_date, days_ahead

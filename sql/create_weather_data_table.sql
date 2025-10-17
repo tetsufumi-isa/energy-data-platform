@@ -10,7 +10,7 @@ CREATE TABLE `energy-env.prod_energy_data.weather_data` (
   relative_humidity_2m FLOAT64,
   precipitation FLOAT64,
   weather_code INT64,
-  created_at TIMESTAMP
+  created_at DATETIME
 )
 PARTITION BY date
 OPTIONS(

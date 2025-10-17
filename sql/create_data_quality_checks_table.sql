@@ -6,7 +6,7 @@ DROP TABLE IF EXISTS `energy-env.prod_energy_data.data_quality_checks`;
 
 CREATE TABLE `energy-env.prod_energy_data.data_quality_checks` (
   check_date DATE,           -- チェック実行日
-  check_timestamp TIMESTAMP, -- チェック実行時刻
+  check_timestamp DATETIME,  -- チェック実行時刻
   data_type STRING,          -- 'power' or 'weather'
   check_type STRING,         -- 'missing'（レコード欠損）, 'null'（NULL値）, 'outlier'（異常値）
   check_target STRING,       -- 対象カラム or '全体'
