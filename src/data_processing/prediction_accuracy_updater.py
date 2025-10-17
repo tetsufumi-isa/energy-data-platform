@@ -132,7 +132,7 @@ class PredictionAccuracyUpdater:
               ABS(pred.predicted_power - energy.actual_power) AS error_absolute,
               ABS(pred.predicted_power - energy.actual_power) / NULLIF(energy.actual_power, 0) * 100 AS error_percentage,
               DATE_DIFF(pred.prediction_date, pred.prediction_run_date, DAY) AS days_ahead,
-              CURRENT_TIMESTAMP() AS created_at
+              CURRENT_TIMESTAMP('Asia/Tokyo') AS created_at
             FROM prediction_filtered pred
             INNER JOIN energy_filtered energy
               ON pred.prediction_date = energy.date

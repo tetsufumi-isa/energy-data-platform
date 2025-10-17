@@ -44,7 +44,7 @@ def main():
 
     # Phase 1: 電力データダウンロード
     print("Phase 1: 電力データダウンロード")
-    result = subprocess.run(['python', '-m', 'src.data_processing.data_downloader', '--days', '5'])
+    result = subprocess.run([sys.executable, '-m', 'src.data_processing.data_downloader', '--days', '5'])
     if result.returncode != 0:
         print("Phase 1 失敗: 電力データダウンロードエラー")
         sys.exit(1)
@@ -52,7 +52,7 @@ def main():
 
     # Phase 2: 気象データダウンロード
     print("Phase 2: 気象データダウンロード")
-    result = subprocess.run(['python', '-m', 'src.data_processing.weather_downloader'])
+    result = subprocess.run([sys.executable, '-m', 'src.data_processing.weather_downloader'])
     if result.returncode != 0:
         print("Phase 2 失敗: 気象データダウンロードエラー")
         sys.exit(1)
@@ -60,7 +60,7 @@ def main():
 
     # Phase 3: 電力データBigQuery投入
     print("Phase 3: 電力データBigQuery投入")
-    result = subprocess.run(['python', '-m', 'src.data_processing.power_bigquery_loader', '--days', '5'])
+    result = subprocess.run([sys.executable, '-m', 'src.data_processing.power_bigquery_loader', '--days', '5'])
     if result.returncode != 0:
         print("Phase 3 失敗: 電力データBQ投入エラー")
         sys.exit(1)
@@ -68,7 +68,7 @@ def main():
 
     # Phase 4-1: 気象データBigQuery投入（過去データ）
     print("Phase 4-1: 気象データBigQuery投入（過去データ）")
-    result = subprocess.run(['python', '-m', 'src.data_processing.weather_bigquery_loader', '--data-type', 'historical'])
+    result = subprocess.run([sys.executable, '-m', 'src.data_processing.weather_bigquery_loader', '--data-type', 'historical'])
     if result.returncode != 0:
         print("Phase 4-1 失敗: 気象過去データBQ投入エラー")
         sys.exit(1)
@@ -76,7 +76,7 @@ def main():
 
     # Phase 4-2: 気象データBigQuery投入（予測データ）
     print("Phase 4-2: 気象データBigQuery投入（予測データ）")
-    result = subprocess.run(['python', '-m', 'src.data_processing.weather_bigquery_loader', '--data-type', 'forecast'])
+    result = subprocess.run([sys.executable, '-m', 'src.data_processing.weather_bigquery_loader', '--data-type', 'forecast'])
     if result.returncode != 0:
         print("Phase 4-2 失敗: 気象予測データBQ投入エラー")
         sys.exit(1)
@@ -84,7 +84,7 @@ def main():
 
     # Phase 5: ml_features更新
     print("Phase 5: ml_features更新（過去7日分の学習データ再構築）")
-    result = subprocess.run(['python', '-m', 'src.data_processing.ml_features_updater'])
+    result = subprocess.run([sys.executable, '-m', 'src.data_processing.ml_features_updater'])
     if result.returncode != 0:
         print("Phase 5 失敗: ml_features更新エラー")
         sys.exit(1)
@@ -92,7 +92,7 @@ def main():
 
     # Phase 6: データ品質チェック
     print("Phase 6: データ品質チェック（直近7日分）")
-    result = subprocess.run(['python', '-m', 'src.monitoring.data_quality_checker', '--days', '7'])
+    result = subprocess.run([sys.executable, '-m', 'src.monitoring.data_quality_checker', '--days', '7'])
     if result.returncode != 0:
         print("Phase 6 失敗: データ品質チェックエラー")
         sys.exit(1)
@@ -100,7 +100,7 @@ def main():
 
     # Phase 7: 予測実行
     print("Phase 7: 予測実行（今日から14日間）")
-    result = subprocess.run(['python', '-m', 'src.prediction.prediction_iterative_with_export'])
+    result = subprocess.run([sys.executable, '-m', 'src.prediction.prediction_iterative_with_export'])
     if result.returncode != 0:
         print("Phase 7 失敗: 予測実行エラー")
         sys.exit(1)
@@ -108,7 +108,7 @@ def main():
 
     # Phase 8: prediction_accuracy更新
     print("Phase 8: prediction_accuracy更新（予測精度分析テーブル更新）")
-    result = subprocess.run(['python', '-m', 'src.data_processing.prediction_accuracy_updater'])
+    result = subprocess.run([sys.executable, '-m', 'src.data_processing.prediction_accuracy_updater'])
     if result.returncode != 0:
         print("Phase 8 失敗: prediction_accuracy更新エラー")
         sys.exit(1)
@@ -116,7 +116,7 @@ def main():
 
     # Phase 9: ダッシュボードデータ更新
     print("Phase 9: ダッシュボードデータ更新（Looker Studio用）")
-    result = subprocess.run(['python', '-m', 'src.data_processing.dashboard_data_updater'])
+    result = subprocess.run([sys.executable, '-m', 'src.data_processing.dashboard_data_updater'])
     if result.returncode != 0:
         print("Phase 9 失敗: ダッシュボードデータ更新エラー")
         sys.exit(1)

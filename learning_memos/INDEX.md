@@ -3,7 +3,7 @@
 ## 🎯 Claude推奨参照順（効率的理解用）
 
 ### **最優先参照**
-- **現在地・進捗**: `20251017_Phase11_DATA_QUALITY_CHECKエラー修正・prediction_accuracy組込完了.md` ← 最新セッション成果
+- **現在地・進捗**: `20251017_Phase11_sys.executable修正・prediction_accuracyタイムゾーン修正.md` ← 最新セッション成果
 - **全体設計**: `各Phase概要.md` ← プロジェクト全体構造・Phase別詳細
 - **システム理解**: `システムフロー.md` ← 技術アーキテクチャ・データフロー
 
@@ -25,7 +25,8 @@
 ## 📊 ファイル分類
 
 ### **📈 進捗・成果記録**
-- `20251017_Phase11_DATA_QUALITY_CHECKエラー修正・prediction_accuracy組込完了.md` ← **最新**
+- `20251017_Phase11_sys.executable修正・prediction_accuracyタイムゾーン修正.md` ← **最新**
+- `20251017_Phase11_DATA_QUALITY_CHECKエラー修正・prediction_accuracy組込完了.md`
 - `20251017_Phase11_ml_features最適化・main_etl組込・prediction_accuracy作成.md`
 - `20251016_Phase11_dashboard_data期間修正・prediction_accuracy設計・ml_features更新モジュール作成.md`
 - `20251016_Phase11_dashboard_data_updaterコードレビュー完了・リファクタリング実施.md`
