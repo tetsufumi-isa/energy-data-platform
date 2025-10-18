@@ -54,7 +54,7 @@ class DataQualityChecker:
             log_data (dict): ログデータ
         """
         # ローカルファイルに記録（実行日の日付を使用）
-        log_date = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
+        log_date = datetime.now().strftime('%Y-%m-%d')
         log_file = self.log_dir / f"{log_date}_quality_check_execution.jsonl"
 
         try:
@@ -71,7 +71,7 @@ class DataQualityChecker:
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
-                'timestamp': datetime.now(ZoneInfo('Asia/Tokyo')).isoformat(),
+                'timestamp': datetime.now().isoformat(),
                 'error_type': 'BQ_INSERT_FAILED',
                 'error_message': str(e),
                 'original_log_data': log_data
@@ -96,7 +96,7 @@ class DataQualityChecker:
             raise ValueError("チェック結果が空です。チェック処理が正常に実行されていません")
 
         # ローカルファイルに保存（実行日の日付を使用）
-        execution_date = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
+        execution_date = datetime.now().strftime('%Y-%m-%d')
         result_file = self.log_dir / f"{execution_date}_quality_check_results.jsonl"
 
         try:
@@ -129,9 +129,9 @@ class DataQualityChecker:
         Returns:
             list: チェック結果のリスト
         """
-        check_date = datetime.now(ZoneInfo('Asia/Tokyo')).date()
-        check_timestamp = datetime.now(ZoneInfo('Asia/Tokyo'))
-        period_end = datetime.now(ZoneInfo('Asia/Tokyo')).date() - timedelta(days=1)  # 昨日まで
+        check_date = datetime.now().date()
+        check_timestamp = datetime.now()
+        period_end = datetime.now().date() - timedelta(days=1)  # 昨日まで
         period_start = period_end - timedelta(days=days-1)
 
         check_results = []
@@ -296,11 +296,11 @@ class DataQualityChecker:
         Returns:
             list: チェック結果のリスト
         """
-        check_date = datetime.now(ZoneInfo('Asia/Tokyo')).date()
-        check_timestamp = datetime.now(ZoneInfo('Asia/Tokyo'))
+        check_date = datetime.now().date()
+        check_timestamp = datetime.now()
         # 過去N日（昨日まで）+ 今日から14日間の予測 = N + 14日分
-        period_start = datetime.now(ZoneInfo('Asia/Tokyo')).date() - timedelta(days=days)
-        period_end = datetime.now(ZoneInfo('Asia/Tokyo')).date() + timedelta(days=13)  # 今日+13日後（14日間）
+        period_start = datetime.now().date() - timedelta(days=days)
+        period_end = datetime.now().date() + timedelta(days=13)  # 今日+13日後（14日間）
 
         check_results = []
         print(f"天気データチェック開始: {period_start} ～ {period_end}")
@@ -503,8 +503,8 @@ class DataQualityChecker:
         """
         # 実行ID・開始時刻記録
         execution_id = str(uuid.uuid4())
-        started_at = datetime.now(ZoneInfo('Asia/Tokyo'))
-        target_date_str = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
+        started_at = datetime.now()
+        target_date_str = datetime.now().strftime('%Y-%m-%d')
 
         print(f"データ品質チェック開始: 直近{days}日分, execution_id={execution_id}")
 
@@ -535,7 +535,7 @@ class DataQualityChecker:
                 overall_status = "OK"
 
             # 品質チェック結果ログ記録
-            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
+            completed_at = datetime.now()
             duration_seconds = int((completed_at - started_at).total_seconds())
 
             log_data = {
@@ -572,7 +572,7 @@ class DataQualityChecker:
             print(f"データ品質チェック失敗: {e}")
 
             # 失敗ログ記録
-            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
+            completed_at = datetime.now()
             duration_seconds = int((completed_at - started_at).total_seconds())
 
             log_data = {

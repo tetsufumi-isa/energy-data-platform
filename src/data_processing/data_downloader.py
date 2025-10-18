@@ -58,7 +58,7 @@ class PowerDataDownloader:
             log_data (dict): ログデータ
         """
         # ローカルファイルに記録（実行日の日付を使用）
-        log_date = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
+        log_date = datetime.now().strftime('%Y-%m-%d')
         log_file = self.log_dir / f"{log_date}_tepco_execution.jsonl"
 
         try:
@@ -75,7 +75,7 @@ class PowerDataDownloader:
         except Exception as e:
             # BQエラーをローカルログにも記録
             error_log = {
-                'timestamp': datetime.now(ZoneInfo('Asia/Tokyo')).isoformat(),
+                'timestamp': datetime.now().isoformat(),
                 'error_type': 'BQ_INSERT_FAILED',
                 'error_message': str(e),
                 'original_log_data': log_data
@@ -99,7 +99,7 @@ class PowerDataDownloader:
         Returns:
             set: 必要な月の文字列セット (例: {'202504', '202505'})
         """
-        yesterday = datetime.now(ZoneInfo('Asia/Tokyo')) - timedelta(days=1)
+        yesterday = datetime.now() - timedelta(days=1)
         dates = [yesterday - timedelta(days=i) for i in range(days + 1)]
         months = {date.strftime('%Y%m') for date in dates}
 
@@ -123,7 +123,7 @@ class PowerDataDownloader:
             raise ValueError(f"日付はYYYYMMDD形式で入力してください: {date_str}")
 
         # 未来日付・当日チェック（電力データは翌日確定のため）
-        yesterday = datetime.now(ZoneInfo('Asia/Tokyo')) - timedelta(days=1)
+        yesterday = datetime.now() - timedelta(days=1)
         if date.date() > yesterday.date():
             yesterday_str = yesterday.strftime('%Y%m%d')
             raise ValueError(f"計測が完了した昨日までの日付しか指定できません: {date_str} (利用可能: {yesterday_str}まで)")
@@ -147,14 +147,14 @@ class PowerDataDownloader:
             requests.exceptions.RequestException: ダウンロードエラー
         """
         execution_id = str(uuid.uuid4())
-        started_at = datetime.now(ZoneInfo('Asia/Tokyo'))
+        started_at = datetime.now()
         url = f"{self.BASE_URL}/{yyyymm}_power_usage.zip"
         month_dir = self.base_dir / yyyymm
         zip_path = month_dir / "zip" / f"{yyyymm}.zip"
 
         # 対象日付が指定されていない場合は昨日を使用（電力使用量データは翌日確定のため）
         if target_date is None:
-            yesterday = datetime.now(ZoneInfo('Asia/Tokyo')) - timedelta(days=1)
+            yesterday = datetime.now() - timedelta(days=1)
             target_date = yesterday.strftime('%Y-%m-%d')
 
         print(f"Downloading: {url}")
@@ -177,7 +177,7 @@ class PowerDataDownloader:
                 zip_ref.extractall(month_dir)
 
             # 成功ログ記録
-            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
+            completed_at = datetime.now()
             file_size_mb = round(zip_path.stat().st_size / 1024 / 1024, 2)
             duration_seconds = int((completed_at - started_at).total_seconds())
 
@@ -187,8 +187,8 @@ class PowerDataDownloader:
                 "process_type": "TEPCO_API",
                 "status": "SUCCESS",
                 "error_message": None,
-                "started_at": started_at.replace(tzinfo=None).isoformat(),
-                "completed_at": completed_at.replace(tzinfo=None).isoformat(),
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
                 "duration_seconds": duration_seconds,
                 "records_processed": None,
                 "file_size_mb": file_size_mb,
@@ -202,7 +202,7 @@ class PowerDataDownloader:
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
                 # 404エラーは警告レベル（データ未公開）
-                completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
+                completed_at = datetime.now()
                 duration_seconds = int((completed_at - started_at).total_seconds())
 
                 log_data = {
@@ -224,7 +224,7 @@ class PowerDataDownloader:
                 return False
             else:
                 # その他のHTTPエラー
-                completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
+                completed_at = datetime.now()
                 duration_seconds = int((completed_at - started_at).total_seconds())
 
                 log_data = {
@@ -246,7 +246,7 @@ class PowerDataDownloader:
                 raise
         except Exception as e:
             # その他のエラー
-            completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
+            completed_at = datetime.now()
             duration_seconds = int((completed_at - started_at).total_seconds())
 
             log_data = {
@@ -255,8 +255,8 @@ class PowerDataDownloader:
                 "process_type": "TEPCO_API",
                 "status": "FAILED",
                 "error_message": f"Error downloading {yyyymm}: {e}",
-                "started_at": started_at.replace(tzinfo=None).isoformat(),
-                "completed_at": completed_at.replace(tzinfo=None).isoformat(),
+                "started_at": started_at.isoformat(),
+                "completed_at": completed_at.isoformat(),
                 "duration_seconds": duration_seconds,
                 "records_processed": None,
                 "file_size_mb": None,
@@ -309,7 +309,7 @@ class PowerDataDownloader:
             raise ValueError(f"月はYYYYMM形式で入力してください: {yyyymm}")
         
         # 未来月チェック
-        current_month = datetime.now(ZoneInfo('Asia/Tokyo')).replace(day=1)
+        current_month = datetime.now().replace(day=1)
         if month_date > current_month:
             current_month_str = current_month.strftime('%Y%m')
             raise ValueError(f"未来の月は指定できません: {yyyymm} (今月: {current_month_str})")
