@@ -161,7 +161,7 @@ def log_and_save_to_bq(client, process_status, log_level='INFO'):
 
 # 実行ID生成（ステータスログ用）
 execution_id = str(uuid.uuid4())
-prediction_start_time = datetime.now(ZoneInfo('Asia/Tokyo'))
+prediction_start_time = datetime.now()
 
 logger.info("段階的予測実験開始")
 logger.info("=" * 60)
@@ -187,7 +187,7 @@ print("BigQueryクライアント初期化完了")
 try:
     # ml_featuresテーブルから学習データ取得（実行日の前日まで）
     logger.info("ml_featuresテーブルから学習データ取得開始")
-    yesterday = (datetime.now(ZoneInfo('Asia/Tokyo')) - timedelta(days=1)).strftime('%Y-%m-%d')
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     logger.info(f"学習データ期間: ～{yesterday}")
     query_ml_features = f"""
     SELECT
@@ -224,8 +224,8 @@ try:
     ml_features_train = ml_features_train.set_index('datetime')
 
     # 予測期間設定（今日から14日間）
-    today = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
-    end_date_str = (datetime.now(ZoneInfo('Asia/Tokyo')) + timedelta(days=13)).strftime('%Y-%m-%d')
+    today = datetime.now().strftime('%Y-%m-%d')
+    end_date_str = (datetime.now() + timedelta(days=13)).strftime('%Y-%m-%d')
     logger.info(f"予測期間: {today} ～ {end_date_str}")
 
     # calendar_dataテーブル取得（営業日判定用・予測期間のみ）
@@ -360,7 +360,7 @@ print("XGBoostモデル学習完了")
 # 営業日のみに絞ったDataFrameを事前作成
 # 過去20日分のみ（lag_1_business_dayの探索範囲）
 # タイムゾーンnaiveなdatetimeに変換（pandasのDatetimeIndexと比較するため）
-lookback_start = pd.to_datetime((datetime.now(ZoneInfo('Asia/Tokyo')) - timedelta(days=20)).replace(tzinfo=None))
+lookback_start = pd.to_datetime((datetime.now() - timedelta(days=20)))
 business_days_train = ml_features_train[
     (ml_features_train.index >= lookback_start) &
     (~ml_features_train['is_holiday']) &
@@ -490,7 +490,7 @@ logger.info("段階的予測完了")
 print(f"\n段階的予測完了")
 
 # 予測完了時刻・処理時間計算
-prediction_end_time = datetime.now(ZoneInfo('Asia/Tokyo'))
+prediction_end_time = datetime.now()
 duration_seconds = int((prediction_end_time - prediction_start_time).total_seconds())
 
 # %%
@@ -510,7 +510,7 @@ def save_prediction_results_to_csv(predictions, execution_id):
         dict: 保存結果情報
     """
     # 実行タイムスタンプ生成（日本時間）
-    now = datetime.now(ZoneInfo('Asia/Tokyo'))
+    now = datetime.now()
     timestamp = now.strftime('%Y%m%d_%H%M%S')
     run_date = now.strftime('%Y-%m-%d')
 
@@ -586,7 +586,7 @@ table_id = 'prediction_results'
 table_ref = f"{client.project}.{dataset_id}.{table_id}"
 
 # 予測結果をBigQuery用に変換
-now = pd.Timestamp.now(tz='Asia/Tokyo')  # 日本時間で明示的に指定
+now = pd.Timestamp.now()  # サーバーローカル時間（JST）
 bq_prediction_data = []
 for target_datetime, predicted_value in predictions.items():
     bq_prediction_data.append({
