@@ -50,7 +50,7 @@ class PredictionAccuracyUpdater:
 
     def delete_recent_data(self):
         """
-        過去7日分のデータを削除
+        過去14日分のデータを削除（予測期間全体をカバー）
 
         Returns:
             int: 削除行数
@@ -61,8 +61,8 @@ class PredictionAccuracyUpdater:
         try:
             delete_query = f"""
             DELETE FROM `{self.project_id}.{self.dataset_id}.{self.table_id}`
-            WHERE prediction_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
-              AND prediction_date < CURRENT_DATE('Asia/Tokyo')
+            WHERE prediction_run_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 14 DAY)
+              AND prediction_run_date <= CURRENT_DATE('Asia/Tokyo')
             """
 
             job = self.bq_client.query(delete_query)
@@ -93,23 +93,23 @@ class PredictionAccuracyUpdater:
             INSERT INTO `{self.project_id}.{self.dataset_id}.{self.table_id}` (
                 execution_id,
                 prediction_run_date,
+                prediction_run_datetime,
                 prediction_date,
                 prediction_hour,
                 predicted_power,
                 actual_power,
                 error_absolute,
                 error_percentage,
-                days_ahead,
-                created_at
+                days_ahead
             )
             WITH prediction_filtered AS (
               SELECT
                 execution_id,
-                DATE(created_at) AS prediction_run_date,
+                CAST(created_at AS DATE) AS prediction_run_date,
+                created_at AS prediction_run_datetime,
                 prediction_date,
                 prediction_hour,
-                predicted_power_kwh AS predicted_power,
-                created_at
+                predicted_power_kwh AS predicted_power
               FROM `{self.project_id}.{self.dataset_id}.prediction_results`
               WHERE prediction_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
                 AND prediction_date < CURRENT_DATE('Asia/Tokyo')  -- 実績確定済みデータのみ（今日は除外）
@@ -126,14 +126,14 @@ class PredictionAccuracyUpdater:
             SELECT
               pred.execution_id,
               pred.prediction_run_date,
+              pred.prediction_run_datetime,
               pred.prediction_date,
               pred.prediction_hour,
               pred.predicted_power,
               energy.actual_power,
               ABS(pred.predicted_power - energy.actual_power) AS error_absolute,
               ABS(pred.predicted_power - energy.actual_power) / NULLIF(energy.actual_power, 0) * 100 AS error_percentage,
-              DATE_DIFF(pred.prediction_date, pred.prediction_run_date, DAY) AS days_ahead,
-              CURRENT_DATETIME('Asia/Tokyo') AS created_at
+              DATE_DIFF(pred.prediction_date, pred.prediction_run_date, DAY) AS days_ahead
             FROM prediction_filtered pred
             INNER JOIN energy_filtered energy
               ON pred.prediction_date = energy.date
