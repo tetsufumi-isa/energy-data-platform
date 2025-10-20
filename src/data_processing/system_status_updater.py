@@ -95,14 +95,14 @@ class SystemStatusUpdater:
                 updated_at,
                 tepco_api_status,
                 weather_api_status,
-                bigquery_process_status,
                 ml_prediction_status,
                 data_quality_status,
+                dashboard_update_status,
                 tepco_api_message,
                 weather_api_message,
-                bigquery_process_message,
                 ml_prediction_message,
-                data_quality_message
+                data_quality_message,
+                dashboard_update_message
             )
             WITH latest_process_status AS (
               -- process_execution_logから各プロセスの最新ステータスを取得
@@ -115,7 +115,7 @@ class SystemStatusUpdater:
                   ORDER BY started_at DESC
                 ) as rn
               FROM `{self.project_id}.{self.dataset_id}.process_execution_log`
-              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
+              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 2 DAY)
             ),
             latest_quality_check AS (
               -- data_quality_checksから最新のチェック結果を取得
@@ -126,7 +126,7 @@ class SystemStatusUpdater:
                   ORDER BY check_timestamp DESC
                 ) as rn
               FROM `{self.project_id}.{self.dataset_id}.data_quality_checks`
-              WHERE check_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
+              WHERE check_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 2 DAY)
             )
             SELECT
               CURRENT_DATETIME('Asia/Tokyo') AS updated_at,
@@ -145,12 +145,6 @@ class SystemStatusUpdater:
               END AS weather_api_status,
 
               CASE
-                WHEN MAX(CASE WHEN process_type = 'BQ_PROCESSING' AND rn = 1 THEN status END) = 'SUCCESS' THEN 'OK'
-                WHEN MAX(CASE WHEN process_type = 'BQ_PROCESSING' AND rn = 1 THEN status END) = 'FAILED' THEN 'ERROR'
-                ELSE 'WARNING'
-              END AS bigquery_process_status,
-
-              CASE
                 WHEN MAX(CASE WHEN process_type = 'ML_PREDICTION' AND rn = 1 THEN status END) = 'SUCCESS' THEN 'OK'
                 WHEN MAX(CASE WHEN process_type = 'ML_PREDICTION' AND rn = 1 THEN status END) = 'FAILED' THEN 'ERROR'
                 ELSE 'WARNING'
@@ -162,14 +156,22 @@ class SystemStatusUpdater:
                 'WARNING'
               ) AS data_quality_status,
 
+              CASE
+                WHEN MAX(CASE WHEN process_type = 'DASHBOARD_UPDATE' AND rn = 1 THEN status END) = 'SUCCESS' THEN 'OK'
+                WHEN MAX(CASE WHEN process_type = 'DASHBOARD_UPDATE' AND rn = 1 THEN status END) = 'FAILED' THEN 'ERROR'
+                ELSE 'WARNING'
+              END AS dashboard_update_status,
+
               -- 各プロセスのエラーメッセージ
               MAX(CASE WHEN process_type = 'TEPCO_API' AND rn = 1 THEN error_message END) AS tepco_api_message,
               MAX(CASE WHEN process_type = 'WEATHER_API' AND rn = 1 THEN error_message END) AS weather_api_message,
-              MAX(CASE WHEN process_type = 'BQ_PROCESSING' AND rn = 1 THEN error_message END) AS bigquery_process_message,
               MAX(CASE WHEN process_type = 'ML_PREDICTION' AND rn = 1 THEN error_message END) AS ml_prediction_message,
 
               -- データ品質チェックの詳細メッセージ
-              (SELECT issue_detail FROM latest_quality_check WHERE rn = 1) AS data_quality_message
+              (SELECT issue_detail FROM latest_quality_check WHERE rn = 1) AS data_quality_message,
+
+              -- ダッシュボード更新のエラーメッセージ
+              MAX(CASE WHEN process_type = 'DASHBOARD_UPDATE' AND rn = 1 THEN error_message END) AS dashboard_update_message
 
             FROM latest_process_status
             """

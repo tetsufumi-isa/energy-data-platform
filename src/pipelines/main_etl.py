@@ -9,6 +9,7 @@
 5. 予測実行（今日から14日間）・CSV/BigQuery保存
 6. prediction_accuracy更新（予測精度分析テーブル更新）
 7. ダッシュボードデータ更新（Looker Studio用統合テーブル）
+8. システム監視ステータス更新（Looker Studio監視ページ用）
 
 実行方法:
     python -m src.pipelines.main_etl
@@ -23,6 +24,7 @@ Note:
     - 予測実行: src.prediction.prediction_iterative_with_export
     - 予測精度更新: src.data_processing.prediction_accuracy_updater
     - ダッシュボード更新: src.data_processing.dashboard_data_updater
+    - システム監視更新: src.data_processing.system_status_updater
 """
 
 import subprocess
@@ -31,7 +33,7 @@ import sys
 
 def main():
     """メイン関数 - 日次ETLパイプライン実行（CLI実行方式）"""
-    print("メインETLパイプライン開始（電力+気象+ml_features+品質チェック+予測+精度分析+ダッシュボード更新統合版）")
+    print("メインETLパイプライン開始（電力+気象+ml_features+品質チェック+予測+精度分析+ダッシュボード更新+監視ステータス更新統合版）")
     print("処理内容:")
     print("  - 電力データ（過去5日分）取得・BQ投入")
     print("  - 気象データ（過去10日+予測14日）取得・BQ投入")
@@ -40,6 +42,7 @@ def main():
     print("  - 予測実行（今日から14日間）・結果保存")
     print("  - prediction_accuracy更新（予測精度分析テーブル更新）")
     print("  - ダッシュボードデータ更新（Looker Studio用）")
+    print("  - システム監視ステータス更新（Looker Studio監視ページ用）")
     print()
 
     # Phase 1: 電力データダウンロード
@@ -119,6 +122,14 @@ def main():
     result = subprocess.run([sys.executable, '-m', 'src.data_processing.dashboard_data_updater'])
     if result.returncode != 0:
         print("Phase 9 失敗: ダッシュボードデータ更新エラー")
+        sys.exit(1)
+    print()
+
+    # Phase 10: システム監視ステータス更新
+    print("Phase 10: システム監視ステータス更新（Looker Studio監視ページ用）")
+    result = subprocess.run([sys.executable, '-m', 'src.data_processing.system_status_updater'])
+    if result.returncode != 0:
+        print("Phase 10 失敗: システム監視ステータス更新エラー")
         sys.exit(1)
     print()
 
