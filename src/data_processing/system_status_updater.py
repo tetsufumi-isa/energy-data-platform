@@ -106,7 +106,14 @@ class SystemStatusUpdater:
                 ml_prediction_message,
                 prediction_accuracy_update_message,
                 data_quality_message,
-                dashboard_update_message
+                dashboard_update_message,
+                tepco_api_duration_seconds,
+                weather_api_duration_seconds,
+                ml_features_update_duration_seconds,
+                ml_prediction_duration_seconds,
+                prediction_accuracy_update_duration_seconds,
+                data_quality_duration_seconds,
+                dashboard_update_duration_seconds
             )
             WITH latest_process_status AS (
               -- process_execution_logから各プロセスの最新ステータスを取得
@@ -114,6 +121,7 @@ class SystemStatusUpdater:
                 process_type,
                 status,
                 error_message,
+                TIMESTAMP_DIFF(completed_at, started_at, MICROSECOND) / 1000000.0 as duration_seconds,
                 ROW_NUMBER() OVER (
                   PARTITION BY process_type
                   ORDER BY started_at DESC
@@ -189,7 +197,16 @@ class SystemStatusUpdater:
               (SELECT issue_detail FROM latest_quality_check WHERE rn = 1) AS data_quality_message,
 
               -- ダッシュボード更新のエラーメッセージ
-              MAX(CASE WHEN process_type = 'DASHBOARD_UPDATE' AND rn = 1 THEN error_message END) AS dashboard_update_message
+              MAX(CASE WHEN process_type = 'DASHBOARD_UPDATE' AND rn = 1 THEN error_message END) AS dashboard_update_message,
+
+              -- 各プロセスの作業時間（秒）
+              MAX(CASE WHEN process_type = 'TEPCO_API' AND rn = 1 THEN duration_seconds END) AS tepco_api_duration_seconds,
+              MAX(CASE WHEN process_type = 'WEATHER_API' AND rn = 1 THEN duration_seconds END) AS weather_api_duration_seconds,
+              MAX(CASE WHEN process_type = 'ML_FEATURES_UPDATE' AND rn = 1 THEN duration_seconds END) AS ml_features_update_duration_seconds,
+              MAX(CASE WHEN process_type = 'ML_PREDICTION' AND rn = 1 THEN duration_seconds END) AS ml_prediction_duration_seconds,
+              MAX(CASE WHEN process_type = 'PREDICTION_ACCURACY_UPDATE' AND rn = 1 THEN duration_seconds END) AS prediction_accuracy_update_duration_seconds,
+              NULL AS data_quality_duration_seconds,
+              MAX(CASE WHEN process_type = 'DASHBOARD_UPDATE' AND rn = 1 THEN duration_seconds END) AS dashboard_update_duration_seconds
 
             FROM latest_process_status
             """
@@ -274,7 +291,7 @@ class SystemStatusUpdater:
 
             # 成功ログ記録
             completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
 
             log_data = {
                 "execution_id": execution_id,
@@ -306,7 +323,7 @@ class SystemStatusUpdater:
 
             # 失敗ログ記録
             completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
 
             log_data = {
                 "execution_id": execution_id,

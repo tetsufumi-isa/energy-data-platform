@@ -22,7 +22,16 @@ CREATE OR REPLACE TABLE `prod_energy_data.system_status` (
   ml_prediction_message STRING,
   prediction_accuracy_update_message STRING,
   data_quality_message STRING,
-  dashboard_update_message STRING  
+  dashboard_update_message STRING,
+
+  -- 各プロセスの作業時間（秒、小数点以下含む）
+  tepco_api_duration_seconds FLOAT64,
+  weather_api_duration_seconds FLOAT64,
+  ml_features_update_duration_seconds FLOAT64,
+  ml_prediction_duration_seconds FLOAT64,
+  prediction_accuracy_update_duration_seconds FLOAT64,
+  data_quality_duration_seconds FLOAT64,
+  dashboard_update_duration_seconds FLOAT64
 )
 OPTIONS(
   description = 'システム監視ステータステーブル（最新1レコードのみ保持）',

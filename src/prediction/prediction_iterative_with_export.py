@@ -491,7 +491,7 @@ print(f"\n段階的予測完了")
 
 # 予測完了時刻・処理時間計算
 prediction_end_time = datetime.now()
-duration_seconds = int((prediction_end_time - prediction_start_time).total_seconds())
+duration_seconds = (prediction_end_time - prediction_start_time).total_seconds()
 
 # %%
 # ================================================================
@@ -632,7 +632,7 @@ logger.info("プロセス実行ステータス記録開始")
 # プロセス実行ステータス作成（BigQueryのprocess_execution_logテーブルスキーマに準拠）
 process_status = {
     'execution_id': execution_id,
-    'date': str(end_date.date()),  # 文字列に変換
+    'date': str(prediction_start_time.date()),  # 予測実行日
     'process_type': 'ML_PREDICTION',
     'status': 'SUCCESS',
     'error_message': None,

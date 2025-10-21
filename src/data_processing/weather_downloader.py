@@ -387,7 +387,7 @@ class WeatherDownloader:
 
                 # 成功ログ記録
                 completed_at = datetime.now()
-                duration_seconds = int((completed_at - started_at).total_seconds())
+                duration_seconds = (completed_at - started_at).total_seconds()
                 total_data_points = sum([item['data_points'] for item in results['historical']]) + \
                                    sum([item['data_points'] for item in results['forecast']])
 
@@ -418,7 +418,7 @@ class WeatherDownloader:
             except Exception as e:
                 # エラーログ記録
                 completed_at = datetime.now()
-                duration_seconds = int((completed_at - started_at).total_seconds())
+                duration_seconds = (completed_at - started_at).total_seconds()
 
                 log_data = {
                     "execution_id": execution_id,
@@ -495,7 +495,7 @@ class WeatherDownloader:
 
                 # 成功ログ記録
                 completed_at = datetime.now()
-                duration_seconds = int((completed_at - started_at).total_seconds())
+                duration_seconds = (completed_at - started_at).total_seconds()
                 total_data_points = sum([item['data_points'] for item in results['historical']])
 
                 log_data = {
@@ -523,7 +523,7 @@ class WeatherDownloader:
             except Exception as e:
                 # エラーログ記録
                 completed_at = datetime.now()
-                duration_seconds = int((completed_at - started_at).total_seconds())
+                duration_seconds = (completed_at - started_at).total_seconds()
 
                 log_data = {
                     "execution_id": execution_id,
@@ -610,7 +610,7 @@ class WeatherDownloader:
 
             # 成功ログ記録
             completed_at = datetime.now()
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
             total_data_points = sum([item['data_points'] for item in results['historical']])
 
             log_data = {
@@ -638,7 +638,7 @@ class WeatherDownloader:
         except Exception as e:
             # エラーログ記録
             completed_at = datetime.now()
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
 
             log_data = {
                 "execution_id": execution_id,
@@ -725,7 +725,7 @@ class WeatherDownloader:
 
             # 成功ログ記録
             completed_at = datetime.now()
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
             total_data_points = sum([item['data_points'] for item in results['historical']])
 
             log_data = {
@@ -754,7 +754,7 @@ class WeatherDownloader:
         except Exception as e:
             # エラーログ記録
             completed_at = datetime.now()
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
 
             log_data = {
                 "execution_id": execution_id,

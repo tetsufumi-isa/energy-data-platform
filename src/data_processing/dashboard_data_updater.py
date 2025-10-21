@@ -292,7 +292,7 @@ class DashboardDataUpdater:
 
             # 成功ログ記録
             completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
 
             log_data = {
                 "execution_id": execution_id,
@@ -324,7 +324,7 @@ class DashboardDataUpdater:
 
             # 失敗ログ記録
             completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
 
             log_data = {
                 "execution_id": execution_id,

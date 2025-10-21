@@ -179,7 +179,7 @@ class PowerDataDownloader:
             # 成功ログ記録
             completed_at = datetime.now()
             file_size_mb = round(zip_path.stat().st_size / 1024 / 1024, 2)
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
 
             log_data = {
                 "execution_id": execution_id,
@@ -203,7 +203,7 @@ class PowerDataDownloader:
             if e.response.status_code == 404:
                 # 404エラーは警告レベル（データ未公開）
                 completed_at = datetime.now()
-                duration_seconds = int((completed_at - started_at).total_seconds())
+                duration_seconds = (completed_at - started_at).total_seconds()
 
                 log_data = {
                     "execution_id": execution_id,
@@ -225,7 +225,7 @@ class PowerDataDownloader:
             else:
                 # その他のHTTPエラー
                 completed_at = datetime.now()
-                duration_seconds = int((completed_at - started_at).total_seconds())
+                duration_seconds = (completed_at - started_at).total_seconds()
 
                 log_data = {
                     "execution_id": execution_id,
@@ -247,7 +247,7 @@ class PowerDataDownloader:
         except Exception as e:
             # その他のエラー
             completed_at = datetime.now()
-            duration_seconds = int((completed_at - started_at).total_seconds())
+            duration_seconds = (completed_at - started_at).total_seconds()
 
             log_data = {
                 "execution_id": execution_id,

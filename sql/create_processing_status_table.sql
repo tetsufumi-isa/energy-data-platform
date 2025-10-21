@@ -10,7 +10,7 @@ CREATE OR REPLACE TABLE `energy-env.prod_energy_data.process_execution_log` (
   error_message STRING,                      -- エラーメッセージ（成功時はNULL）
   started_at DATETIME NOT NULL,              -- プロセス開始時刻
   completed_at DATETIME,                     -- プロセス完了時刻（実行中はNULL）
-  duration_seconds INT,                      -- 処理時間（秒）
+  duration_seconds FLOAT64,                  -- 処理時間（秒、小数点以下含む）
   records_processed INT,                     -- 処理レコード数
   file_size_mb FLOAT64,                        -- ファイルサイズ（MB、API_DOWNLOADのみ）
   additional_info JSON                       -- プロセス固有の追加情報
