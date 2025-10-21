@@ -95,12 +95,16 @@ class SystemStatusUpdater:
                 updated_at,
                 tepco_api_status,
                 weather_api_status,
+                ml_features_update_status,
                 ml_prediction_status,
+                prediction_accuracy_update_status,
                 data_quality_status,
                 dashboard_update_status,
                 tepco_api_message,
                 weather_api_message,
+                ml_features_update_message,
                 ml_prediction_message,
+                prediction_accuracy_update_message,
                 data_quality_message,
                 dashboard_update_message
             )
@@ -145,10 +149,22 @@ class SystemStatusUpdater:
               END AS weather_api_status,
 
               CASE
+                WHEN MAX(CASE WHEN process_type = 'ML_FEATURES_UPDATE' AND rn = 1 THEN status END) = 'SUCCESS' THEN 'OK'
+                WHEN MAX(CASE WHEN process_type = 'ML_FEATURES_UPDATE' AND rn = 1 THEN status END) = 'FAILED' THEN 'ERROR'
+                ELSE 'WARNING'
+              END AS ml_features_update_status,
+
+              CASE
                 WHEN MAX(CASE WHEN process_type = 'ML_PREDICTION' AND rn = 1 THEN status END) = 'SUCCESS' THEN 'OK'
                 WHEN MAX(CASE WHEN process_type = 'ML_PREDICTION' AND rn = 1 THEN status END) = 'FAILED' THEN 'ERROR'
                 ELSE 'WARNING'
               END AS ml_prediction_status,
+
+              CASE
+                WHEN MAX(CASE WHEN process_type = 'PREDICTION_ACCURACY_UPDATE' AND rn = 1 THEN status END) = 'SUCCESS' THEN 'OK'
+                WHEN MAX(CASE WHEN process_type = 'PREDICTION_ACCURACY_UPDATE' AND rn = 1 THEN status END) = 'FAILED' THEN 'ERROR'
+                ELSE 'WARNING'
+              END AS prediction_accuracy_update_status,
 
               -- データ品質ステータス（OK/WARNING/ERROR）
               COALESCE(
@@ -165,7 +181,9 @@ class SystemStatusUpdater:
               -- 各プロセスのエラーメッセージ
               MAX(CASE WHEN process_type = 'TEPCO_API' AND rn = 1 THEN error_message END) AS tepco_api_message,
               MAX(CASE WHEN process_type = 'WEATHER_API' AND rn = 1 THEN error_message END) AS weather_api_message,
+              MAX(CASE WHEN process_type = 'ML_FEATURES_UPDATE' AND rn = 1 THEN error_message END) AS ml_features_update_message,
               MAX(CASE WHEN process_type = 'ML_PREDICTION' AND rn = 1 THEN error_message END) AS ml_prediction_message,
+              MAX(CASE WHEN process_type = 'PREDICTION_ACCURACY_UPDATE' AND rn = 1 THEN error_message END) AS prediction_accuracy_update_message,
 
               -- データ品質チェックの詳細メッセージ
               (SELECT issue_detail FROM latest_quality_check WHERE rn = 1) AS data_quality_message,

@@ -9,14 +9,18 @@ CREATE OR REPLACE TABLE `prod_energy_data.system_status` (
   -- 各プロセスのステータス（OK/ERROR/WARNING）
   tepco_api_status STRING NOT NULL,
   weather_api_status STRING NOT NULL,
+  ml_features_update_status STRING NOT NULL,
   ml_prediction_status STRING NOT NULL,
+  prediction_accuracy_update_status STRING NOT NULL,
   data_quality_status STRING NOT NULL,
   dashboard_update_status STRING NOT NULL,
 
   -- 各項目の詳細情報（エラーメッセージなど）
   tepco_api_message STRING,
   weather_api_message STRING,
+  ml_features_update_message STRING,
   ml_prediction_message STRING,
+  prediction_accuracy_update_message STRING,
   data_quality_message STRING,
   dashboard_update_message STRING  
 )

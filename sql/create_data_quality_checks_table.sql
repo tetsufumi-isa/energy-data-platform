@@ -2,9 +2,7 @@
 -- 目的: データ品質監視・異常検知結果の記録
 -- 更新方針: 日次実行でチェック結果を追加
 
-DROP TABLE IF EXISTS `energy-env.prod_energy_data.data_quality_checks`;
-
-CREATE TABLE `energy-env.prod_energy_data.data_quality_checks` (
+CREATE OR REPLACE TABLE `energy-env.prod_energy_data.data_quality_checks` (
   check_date DATE,           -- チェック実行日
   check_timestamp DATETIME,  -- チェック実行時刻
   data_type STRING,          -- 'power' or 'weather'
