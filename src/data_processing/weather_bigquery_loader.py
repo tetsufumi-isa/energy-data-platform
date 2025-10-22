@@ -276,7 +276,7 @@ class WeatherBigQueryLoader:
             log_data = {
                 "execution_id": execution_id,
                 "date": target_date_str,
-                "process_type": "WEATHER_BQ_LOAD",
+                "process_type": f"WEATHER_BQ_LOAD_{data_type.upper()}",
                 "status": "SUCCESS",
                 "error_message": None,
                 "started_at": started_at.isoformat(),
@@ -308,7 +308,7 @@ class WeatherBigQueryLoader:
             log_data = {
                 "execution_id": execution_id,
                 "date": target_date_str,
-                "process_type": "WEATHER_BQ_LOAD",
+                "process_type": f"WEATHER_BQ_LOAD_{data_type.upper()}",
                 "status": "FAILED",
                 "error_message": str(e),
                 "started_at": started_at.isoformat(),
