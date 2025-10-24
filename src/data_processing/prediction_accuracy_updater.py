@@ -69,7 +69,7 @@ class PredictionAccuracyUpdater:
             job.result()  # クエリ完了を待機
             deleted_rows = job.num_dml_affected_rows
 
-            print(f"過去7日分のデータ削除完了: {deleted_rows}行削除")
+            print(f"過去14日分のデータ削除完了: {deleted_rows}行削除")
             return deleted_rows
 
         except Exception as e:
@@ -79,7 +79,7 @@ class PredictionAccuracyUpdater:
 
     def insert_prediction_accuracy(self):
         """
-        過去7日分のprediction_accuracyデータを再投入
+        過去14日分のprediction_accuracyデータを再投入
         prediction_resultsとenergy_data_hourlyをJOINして精度計算
 
         Returns:
@@ -111,7 +111,8 @@ class PredictionAccuracyUpdater:
                 prediction_hour,
                 predicted_power_kwh AS predicted_power
               FROM `{self.project_id}.{self.dataset_id}.prediction_results`
-              WHERE prediction_date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
+              WHERE CAST(created_at AS DATE) >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 14 DAY)
+                AND CAST(created_at AS DATE) <= CURRENT_DATE('Asia/Tokyo')
                 AND prediction_date < CURRENT_DATE('Asia/Tokyo')  -- 実績確定済みデータのみ（今日は除外）
             ),
             energy_filtered AS (
@@ -120,7 +121,7 @@ class PredictionAccuracyUpdater:
                 hour,
                 actual_power
               FROM `{self.project_id}.{self.dataset_id}.energy_data_hourly`
-              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 7 DAY)
+              WHERE date >= DATE_SUB(CURRENT_DATE('Asia/Tokyo'), INTERVAL 14 DAY)
                 AND date < CURRENT_DATE('Asia/Tokyo')
             )
             SELECT
@@ -196,8 +197,8 @@ class PredictionAccuracyUpdater:
         prediction_accuracyテーブル更新のメイン処理
 
         処理フロー:
-        1. 過去7日分のデータを削除
-        2. 過去7日分の予測値+実績値をJOINして再投入
+        1. 過去14日分のデータを削除（prediction_run_date基準）
+        2. 過去14日分の予測値+実績値をJOINして再投入（prediction_run_date基準）
 
         Returns:
             dict: 処理結果
@@ -216,7 +217,7 @@ class PredictionAccuracyUpdater:
             # 2. 過去7日分のデータを再投入
             inserted_rows = self.insert_prediction_accuracy()
 
-            print(f"prediction_accuracy更新完了: 削除{deleted_rows}行, 挿入{inserted_rows}行")
+            print(f"prediction_accuracy更新完了（過去14日分）: 削除{deleted_rows}行, 挿入{inserted_rows}行")
 
             # 成功ログ記録
             completed_at = datetime.now(ZoneInfo('Asia/Tokyo'))
