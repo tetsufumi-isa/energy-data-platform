@@ -1,14 +1,14 @@
 # 電力データ分析基盤（Energy Data Platform）
 
-Google Cloud Platformを活用したデータ分析基盤です。データ収集、ETL処理、機械学習予測、Looker Studioによる可視化・監視までを統合した自動化パイプラインを実装しています。データの上流（収集）から下流（可視化）まで一気通貫で実装し、さらに機械学習による予測まで対応できるスキル実証を目的とし個人開発にて構築しています。
+Google Cloud Platformを活用したデータ分析基盤です。データ収集、ETL処理、機械学習予測、Looker Studioによる可視化・監視までを統合した自動化パイプラインを実装しています。データ収集～基盤設計・構築～データマート作成・BIダッシュボード構築まで一気通貫で実装し、さらに機械学習による予測まで対応できるスキル実証を目的とし個人開発にて構築しています。
 
 ## プロジェクト概要
 
-**目的**: データエンジニアリング × MLエンジニアリングの統合スキル実証
-**アプローチ**: データの上流（収集）から下流（可視化）まで一気通貫で構築
-**技術要素**: データ収集（東電API・気象API）→ ETL処理（BigQuery）→ 機械学習（XGBoost）→ BI可視化（Looker Studio）
-**予測機能**: 14日間（336時間）の時系列予測、MAPE 7%程度
-**ダッシュボード**: [Looker Studioで可視化](https://lookerstudio.google.com/reporting/c99e4784-b17e-431f-97cb-0a624ecd97e0)
+- **目的**: データエンジニアリング × MLエンジニアリングの統合スキル実証
+- **アプローチ**: データ収集～基盤設計・構築～データマート作成・BIダッシュボード構築まで一気通貫で実装
+- **技術要素**: データ収集（東電API・気象API）→ ETL処理（BigQuery）→ 機械学習（XGBoost）→ BI可視化（Looker Studio）
+- **予測機能**: 14日間（336時間）の時系列予測、MAPE 7%程度
+- **ダッシュボード**: [Looker Studioで可視化](https://lookerstudio.google.com/s/kf7uvYCkRT4)
 
 ## 主要機能
 
@@ -40,7 +40,7 @@ Google Cloud Platformを活用したデータ分析基盤です。データ収�
   - ローカルファイルとBigQueryへの二重記録
   - 処理時間・成功/失敗ステータスの自動記録
   - Looker Studioでの可視化
-- **統合ダッシュボード**: [Looker Studioで可視化](https://lookerstudio.google.com/reporting/c99e4784-b17e-431f-97cb-0a624ecd97e0)
+- **統合ダッシュボード**: [Looker Studioで可視化](https://lookerstudio.google.com/s/kf7uvYCkRT4)
 
 ## システムアーキテクチャ
 
@@ -119,9 +119,9 @@ graph TB
 | **機械学習** | XGBoost, scikit-learn |
 | **データ処理** | pandas, numpy |
 | **クラウド** | Google Cloud Platform (BigQuery, Cloud Storage) |
-| **BI/可視化** | Looker Studio, matplotlib, seaborn |
+| **BI/可視化** | Looker Studio |
 | **API** | 東京電力API, Open-Meteo API |
-| **その他** | python-dotenv, requests |
+| **その他** | requests |
 
 ## 予測精度と成果
 
@@ -365,7 +365,8 @@ predict(11月8日) → 10月26日から11月7日の予測値を使って予測
 - Web UIでのパイプライン監視・制御機能
 
 ## スキルセット
-- データエンジニアリング（ETL、データパイプライン、BigQuery）
+- データ収集～基盤構築～BI可視化まで一気通貫で対応
+- データエンジニアリング（ETL、データパイプライン、BigQuery、データマート作成）
 - 機械学習（XGBoost、特徴量エンジニアリング、時系列予測）
 - Google Cloud Platform（BigQuery、Cloud Storage、Looker Studio）
 - Python開発（pandas、numpy、scikit-learn）
