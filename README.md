@@ -1,17 +1,14 @@
-# 電力使用量予測パイプライン（Energy Demand Prediction Pipeline）
+# 電力データ分析基盤（Energy Data Platform）
 
-Google Cloud Platformを活用した、電力使用量の予測システムです。データ収集から予測、可視化までの完全自動化パイプラインを実装しています。
-
-**このプロジェクトは個人開発により構築されたデータパイプラインです。**
+Google Cloud Platformを活用したデータ分析基盤です。データ収集、ETL処理、機械学習予測、Looker Studioによる可視化・監視までを統合した自動化パイプラインを実装しています。データの上流（収集）から下流（可視化）まで一気通貫で実装し、さらに機械学習による予測まで対応できるスキル実証を目的とし個人開発にて構築しています。
 
 ## プロジェクト概要
 
-**目的**: 東京電力管内の電力使用量を機械学習で予測
-**予測精度**: MAPE 5%以下を達成
-**予測期間**: 14日間（336時間）の時系列予測
-**技術スタック**: Python 3.12 + XGBoost + Google Cloud Platform + Looker Studio
-
-このプロジェクトは、データエンジニアリングとMLエンジニアリングのスキルを統合し、実務に近い開発プロセスで構築されています。
+**目的**: データエンジニアリング × MLエンジニアリングの統合スキル実証
+**アプローチ**: データの上流（収集）から下流（可視化）まで一気通貫で構築
+**技術要素**: データ収集（東電API・気象API）→ ETL処理（BigQuery）→ 機械学習（XGBoost）→ BI可視化（Looker Studio）
+**予測機能**: 14日間（336時間）の時系列予測、MAPE 7%程度
+**ダッシュボード**: [Looker Studioで可視化](https://lookerstudio.google.com/reporting/c99e4784-b17e-431f-97cb-0a624ecd97e0)
 
 ## 主要機能
 
@@ -21,10 +18,10 @@ Google Cloud Platformを活用した、電力使用量の予測システムで�
 - **データ品質チェック**: 欠損値・異常値の自動検知とログ記録
 
 ### 2. 機械学習による予測
-- **XGBoostモデル**: 190特徴量を用いた時系列予測
+- **XGBoostモデル**: 時系列パターンを重視した12特徴量による予測
 - **特徴量エンジニアリング**:
-  - ラグ特徴量（営業日ベース・全日ベース）
-  - カレンダー特徴量（曜日・祝日・時間帯）
+  - ラグ特徴量（1日前・7日前・1営業日前）
+  - カレンダー特徴量（曜日・祝日・時間帯・循環特徴量）
   - 気象特徴量（気温・湿度・降水量）
 - **段階的予測**: 実運用を想定した14日間の段階的予測
 
@@ -34,63 +31,84 @@ Google Cloud Platformを活用した、電力使用量の予測システムで�
   - 予測結果の履歴管理
   - システム監視ログ
 - **Cloud Storage**: 生データの永続化
-- **Looker Studio**: リアルタイム監視ダッシュボード
 
 ### 4. 運用監視システム
 - **7プロセス監視**: ETLパイプライン全体の実行状況を監視
 - **データ品質チェック**: 自動品質検証とアラート
-- **予測精度検証**: 16日ごとの精度検証と分析
-- **エラーログ管理**: BigQueryに記録されたエラーログをLooker Studioで可視化
+- **予測精度検証**: 14日ごとの精度検証と分析
+- **実行ログ管理**:
+  - ローカルファイルとBigQueryへの二重記録
+  - 処理時間・成功/失敗ステータスの自動記録
+  - Looker Studioでの可視化
 - **統合ダッシュボード**: [Looker Studioで可視化](https://lookerstudio.google.com/reporting/c99e4784-b17e-431f-97cb-0a624ecd97e0)
 
 ## システムアーキテクチャ
 
 ```mermaid
+%%{
+  init: {
+    'theme':'dark',
+    'themeVariables': {
+      'fontSize':'17px',
+      'fontFamily':'Arial',
+      'clusterBkg':'#1f2937',
+      'clusterBorder':'#0b163a',
+      'labelTextColor':'#ffffff'
+    }
+  }
+}%%
 graph TB
     subgraph データ収集層
-        A1[東京電力API] --> B1[PowerDataDownloader]
-        A2[Open-Meteo API] --> B2[WeatherDownloader]
+        A1["<b>東京電力API</b>"]
+        A2["<b>Open-Meteo API</b>"]
+        A1 --> B1["<b>PowerDataDownloader</b>"]
+        A2 --> B2["<b>WeatherDownloader</b>"]
     end
 
     subgraph ETL処理層
-        B1 --> C1[データクレンジング]
-        B2 --> C1
-        C1 --> C2[特徴量生成<br/>190特徴量]
-        C2 --> C3[BigQueryロード]
+        C1["<b>データクレンジング</b>"]
+        C2["<b>特徴量生成</b><br/><i>12特徴量</i>"]
+        C3["<b>BigQueryロード</b>"]
+        C1 --> C2
+        C2 --> C3
     end
+
+    B1 --> C1
+    B2 --> C1
 
     subgraph データ基盤層GCP
-        C3 --> D1[(BigQuery)]
-        C3 --> D2[(Cloud Storage)]
-        D1 --> D1a[power_weather_integrated]
-        D1 --> D1b[ml_features]
-        D1 --> D1c[prediction_results]
-        D1 --> D1d[prediction_accuracy]
-        D1 --> D1e[system_status]
-        D1 --> D1f[process_execution_log]
-        D1 --> D1g[data_quality_checks]
-        D1 --> D1h[dashboard_data]
+        D1["<b>BigQuery</b><br/>━━━━━━━━━━━<br/>• power_weather_integrated<br/>• ml_features<br/>• prediction_results<br/>• prediction_accuracy<br/>• system_status<br/>• process_execution_log<br/>• data_quality_checks<br/>• dashboard_data"]
+        D2["<b>Cloud Storage</b><br/><i>バックアップ・履歴管理</i>"]
     end
+
+    C3 --> D1
+    C3 --> D2
 
     subgraph 機械学習層
-        D1b --> E1[XGBoostモデル<br/>MAPE 5%以下]
-        E1 --> E2[14日間段階的予測<br/>336時間]
-        E2 --> D1c
+        E1["<b>XGBoostモデル</b><br/><i>MAPE 7%程度</i>"]
+        E2["<b>14日間段階的予測</b><br/><i>336時間予測</i>"]
+        E1 --> E2
+        E2 --> D1
     end
+
+    D1 --> E1
 
     subgraph 可視化監視層
-        D1 --> F1[Looker Studio]
-        F1 --> F1a[システム監視<br/>7プロセス]
-        F1 --> F1b[予測結果表示]
-        F1 --> F1c[予測精度分析<br/>16日ごと検証]
-        F1 --> F1d[データ品質チェック結果]
+        F1["<b>Looker Studio</b><br/>━━━━━━━━━━━<br/>• システム監視(7プロセス)<br/>• 予測結果表示<br/>• 予測精度分析<br/>• データ品質チェック結果"]
     end
 
-    style データ収集層 fill:#e1f5ff
-    style ETL処理層 fill:#fff4e1
-    style データ基盤層GCP fill:#e8f5e9
-    style 機械学習層 fill:#f3e5f5
-    style 可視化監視層 fill:#fce4ec
+    D1 --> F1
+
+    classDef defaultStyle fill:#1a223d,stroke:#9fa8da,stroke-width:0.5px,color:#fff,rx:10,ry:10
+    classDef clusterStyle rx:15,ry:15
+
+    class A1,A2,B1,B2,C1,C2,C3,D1,D2,E1,E2,F1 defaultStyle
+
+    style データ収集層 rx:15,ry:15
+    style ETL処理層 rx:15,ry:15
+    style データ基盤層GCP rx:15,ry:15
+    style 機械学習層 rx:15,ry:15
+    style 可視化監視層 rx:15,ry:15
 ```
 
 ## 技術スタック
@@ -112,13 +130,14 @@ graph TB
 | モデル | MAPE | 説明 |
 |--------|------|------|
 | **カレンダー特徴量のみ** | 7%程度 | ベースライン（曜日・時間帯・祝日） |
-| **全特徴量（固定予測）** | 3%程度 | 実測値ラグを使用 |
-| **段階的予測（実運用）** | **5%以下** | 予測値ラグを使用 |
+| **全特徴量（1週間予測）** | 2-3%程度 | 実測値ラグを使用した短期予測 |
+| **段階的予測（14日間）** | **7%程度** | 予測値ラグを使用した実運用想定 |
 
 ### 技術的成果
 
-1. **予測精度MAPE 5%以下を達成**
-   - 14日後の予測でも精度を維持
+1. **段階的予測による実運用対応**
+   - 短期予測（1週間）: MAPE 2-3%程度
+   - 長期予測（14日間）: MAPE 7%程度
 
 2. **完全自動化パイプライン**
    - データ収集からBigQuery投入まで完全自動化
@@ -126,23 +145,27 @@ graph TB
    - 失敗時はリトライ処理を実装し、BigQueryログ経由で監視可能
    - システム監視とアラート
 
-3. **実運用対応**
+3. **データ可視化・BI実装**
+   - Looker Studioダッシュボードを設計・実装
+   - 7プロセス監視、予測結果、精度分析、データ品質を統合
+   - BigQueryとの連携による日次自動更新
+
+4. **実運用対応**
    - 土日祝日の欠損値自動処理
    - API制限への対応
    - パーティション設計による大規模データ管理
 
-4. **データ品質管理**
+5. **データ品質管理**
    - 自動品質チェック（欠損値・外れ値検出）
    - 実行ログの完全記録
    - 予測精度の継続的検証
 
-### 開発環境
+### AI支援による開発プロセス
 
 **Claude Code**:
-- AI支援開発ツールとしてペアプログラミング的に活用
-- 全コードの読解・理解を実施
-- 詳細な修正指示によりコード品質を維持
-- 設計判断は開発者が主導
+- 初期コード生成にClaude Codeを活用
+- AI出力をそのまま用いるのではなく全コードを精査し、構造設計・リファクタリング・機能追加を開発者が主導し最適化
+- ペアプログラミング的な活用により開発効率を向上
 
 ## プロジェクト構成
 
@@ -152,16 +175,16 @@ energy-env/
 │   ├── data_processing/          # データ収集・処理
 │   │   ├── data_downloader.py    # 東京電力APIからデータ取得
 │   │   ├── weather_downloader.py # 気象データ取得
-│   │   ├── weather_bigquery_loader.py
-│   │   ├── power_bigquery_loader.py
-│   │   ├── ml_features_updater.py # 特徴量生成
-│   │   ├── dashboard_data_updater.py
-│   │   ├── prediction_accuracy_updater.py
-│   │   └── system_status_updater.py
+│   │   ├── weather_bigquery_loader.py # 気象データBigQuery投入
+│   │   ├── power_bigquery_loader.py   # 電力データBigQuery投入
+│   │   ├── ml_features_updater.py     # ML用特徴量生成・更新
+│   │   ├── dashboard_data_updater.py  # ダッシュボード用データ更新
+│   │   ├── prediction_accuracy_updater.py # 予測精度検証データ更新
+│   │   └── system_status_updater.py   # システムステータス更新
 │   ├── pipelines/
 │   │   └── main_etl.py           # 統合ETLパイプライン
 │   ├── prediction/
-│   │   └── prediction_iterative_with_export.py # 予測実行
+│   │   └── prediction_iterative_with_export.py # 段階的予測実行
 │   ├── monitoring/
 │   │   └── data_quality_checker.py # データ品質チェック
 │   └── utils/
@@ -228,7 +251,11 @@ GCP_PROJECT_ID=your-project-id
 
 ```bash
 # 仮想環境の有効化
-source venv/Scripts/activate
+# Windows
+venv\Scripts\activate
+
+# Linux/Mac
+source venv/bin/activate
 
 # データ収集（過去7日分）
 python -m src.pipelines.main_etl --days 7
@@ -252,10 +279,10 @@ python -m src.utils.check_ml_features_missing
 |-------|------|---------|
 | **Phase 1-2** | 電力データ基盤 | 東京電力API統合、30ヶ月分データ取得 |
 | **Phase 3-4** | 気象データ基盤 | Open-Meteo API統合、BigQuery自動投入 |
-| **Phase 5-6** | 特徴量エンジニアリング | 190特徴量生成、時系列分析 |
-| **Phase 7** | 機械学習モデル構築 | XGBoost実装、MAPE 2.33%達成 |
+| **Phase 5-6** | 特徴量エンジニアリング | 190特徴量設計、時系列分析基盤構築 |
+| **Phase 7** | 機械学習モデル構築 | 特徴量選択、XGBoost実装、MAPE 2.33%達成 |
 | **Phase 8** | モデル評価・改善 | 評価指標深層理解、残差分析 |
-| **Phase 9** | 品質向上 | 外れ値削減、MAPE 2.15%達成 |
+| **Phase 9** | 品質向上 | 12特徴量に絞り込み、MAPE 2.15%達成 |
 | **Phase 10** | 自動化システム | 日次自動予測、土日祝日対応 |
 | **Phase 11** | 監視・可視化 | Looker Studio、7プロセス監視 |
 
@@ -263,30 +290,51 @@ python -m src.utils.check_ml_features_missing
 
 ### 1. 特徴量エンジニアリング
 
-**190特徴量の構成**:
-- カレンダー特徴量（14種）: 曜日、時間帯、祝日、循環特徴量
-- ラグ特徴量（営業日ベース・全日ベース、各90種）
-- 気象特徴量: 気温、湿度、降水量、天気コード
+**試行錯誤による最適化**:
+- Phase 5-6で190特徴量を設計（営業日・全日ベースのラグ特徴量、移動平均、変化率など）
+- 気象データは関東全域平均・各都道府県を試行し、千葉県単独が最も精度が高いことを確認
+- Phase 7-9で段階的な実験を実施
+- 直前の使用量パターンが予測精度の鍵であることを発見
+- 最終的に12特徴量に絞り込み、短期予測でMAPE 2-3%程度を達成
 
+**最終的な12特徴量**:
 ```python
-# 営業日ベースラグ特徴量の例
-- lag_1_business_day, lag_2_business_day, ..., lag_30_business_day  # 30特徴量
-- avg_5_business_days, avg_10_business_days, ...                    # 6特徴量
-- change_rate_1_business_day, ...                                   # 30特徴量
+# 時系列特徴量（3個）- 特に1営業日前が重要
+'lag_1_day',              # 1日前同時刻
+'lag_7_day',              # 7日前同時刻
+'lag_1_business_day',     # 1営業日前同時刻
+
+# カレンダー特徴量（6個）
+'hour',                   # 時間（0-23）
+'is_weekend',             # 週末フラグ
+'is_holiday',             # 祝日フラグ
+'month',                  # 月（1-12）
+'hour_sin',               # 時間周期性（sin）
+'hour_cos',               # 時間周期性（cos）
+
+# 気象特徴量（3個）
+'temperature_2m',         # 気温
+'relative_humidity_2m',   # 湿度
+'precipitation'           # 降水量
 ```
 
 ### 2. 段階的予測ロジック
 
-実運用では未来のラグ特徴量が存在しないため、予測値を使用して段階的に予測を進めます：
+予測には「前日の使用量」が重要な特徴量だが、未来を予測する際にはその前日自体も未来である。そのため、予測値を使って次の日を予測する段階的なプロセスを実装。
 
 ```python
-# 予測日（1日目）: 実測値ラグを使用
-predict(day=1) → 高い精度
+# 例: 10月25日時点で10月26日～11月8日（14日間）を予測
 
-# 14日後: 予測値ラグを使用
-predict(day=14) → 精度を維持
+# 1日目（10月26日）: 前日（10月25日）は実測値
+predict(10月26日) → 実測値ベースで予測
 
-# 14日間全体: MAPE 5%以下
+# 7日目（11月1日）: 前日（10月31日）は予測値
+predict(11月1日) → 10月26日から10月31日の予測値を使って予測
+
+# 14日目（11月8日）: 前日（11月7日）も予測値
+predict(11月8日) → 10月26日から11月7日の予測値を使って予測
+
+# 結果: 14日間全体でMAPE 7%程度
 ```
 
 ### 3. BigQueryテーブル設計
