@@ -524,6 +524,7 @@ def save_prediction_results_to_csv(predictions, execution_id):
     for target_datetime, predicted_value in predictions.items():
         prediction_data.append({
             'execution_id': execution_id,
+            'prediction_run_date': run_date,
             'prediction_date': target_datetime.strftime('%Y-%m-%d'),
             'prediction_hour': target_datetime.hour,
             'predicted_power_kwh': round(predicted_value, 2),
@@ -591,7 +592,8 @@ bq_prediction_data = []
 for target_datetime, predicted_value in predictions.items():
     bq_prediction_data.append({
         'execution_id': execution_id,
-        'prediction_date': pd.Timestamp(target_datetime.date()),  # pandas Timestamp
+        'prediction_run_date': now.date(),
+        'prediction_date': target_datetime.date(),
         'prediction_hour': target_datetime.hour,
         'predicted_power_kwh': round(predicted_value, 2),
         'created_at': now
@@ -634,8 +636,8 @@ process_status = {
     'execution_id': execution_id,
     'date': str(prediction_start_time.date()),  # 予測実行日
     'process_type': 'ML_PREDICTION',
-    'status': 'SUCCESS',
-    'error_message': None,
+    'status': 'FAILED' if not bq_insert_success else 'SUCCESS',
+    'error_message': bq_error_message if not bq_insert_success else None,
     'started_at': prediction_start_time,
     'completed_at': prediction_end_time,
     'duration_seconds': duration_seconds,
