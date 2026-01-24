@@ -62,39 +62,47 @@ ETL処理、XGBoostによる14日間の電力使用量予測、Looker Studioに�
   }
 }%%
 graph TB
-    subgraph データ収集層
-        A1["<b>東京電力API</b>"]
-        A2["<b>Open-Meteo API</b>"]
-        A1 --> B1["<b>PowerDataDownloader</b>"]
-        A2 --> B2["<b>WeatherDownloader</b>"]
+    subgraph オーケストレーション層
+        O1["<b>Apache Airflow</b><br/><i>DAGスケジューリング</i>"]
     end
 
-    subgraph ETL処理層
-        C1["<b>データクレンジング</b>"]
-        C2["<b>特徴量生成</b><br/><i>12特徴量</i>"]
-        C3["<b>BigQueryロード</b>"]
-        C1 --> C2
-        C2 --> C3
+    subgraph DockerCompose["Docker Compose 実行基盤"]
+        subgraph データ収集層
+            A1["<b>東京電力API</b>"]
+            A2["<b>Open-Meteo API</b>"]
+            A1 --> B1["<b>PowerDataDownloader</b>"]
+            A2 --> B2["<b>WeatherDownloader</b>"]
+        end
+
+        subgraph ETL処理層
+            C1["<b>データクレンジング</b>"]
+            C2["<b>BigQueryロード</b>"]
+            C3["<b>dbt</b><br/><i>データマート作成</i>"]
+            C1 --> C2
+            C2 --> C3
+        end
+
+        B1 --> C1
+        B2 --> C1
+
+        subgraph 機械学習層
+            E1["<b>XGBoostモデル</b><br/><i>MAPE 7%程度</i>"]
+            E2["<b>14日間段階的予測</b><br/><i>336時間予測</i>"]
+            E1 --> E2
+        end
     end
 
-    B1 --> C1
-    B2 --> C1
+    O1 -->|Task Trigger| DockerCompose
 
     subgraph データ基盤層GCP
         D1["<b>BigQuery</b><br/>━━━━━━━━━━━<br/>• power_weather_integrated<br/>• ml_features<br/>• prediction_results<br/>• prediction_accuracy<br/>• system_status<br/>• process_execution_log<br/>• data_quality_checks<br/>• dashboard_data"]
         D2["<b>Cloud Storage</b><br/><i>バックアップ・履歴管理</i>"]
     end
 
+    C2 --> D1
+    C2 --> D2
     C3 --> D1
-    C3 --> D2
-
-    subgraph 機械学習層
-        E1["<b>XGBoostモデル</b><br/><i>MAPE 7%程度</i>"]
-        E2["<b>14日間段階的予測</b><br/><i>336時間予測</i>"]
-        E1 --> E2
-        E2 --> D1
-    end
-
+    E2 --> D1
     D1 --> E1
 
     subgraph 可視化監視層
@@ -104,10 +112,11 @@ graph TB
     D1 --> F1
 
     classDef defaultStyle fill:#1a223d,stroke:#9fa8da,stroke-width:0.5px,color:#fff,rx:10,ry:10
-    classDef clusterStyle rx:15,ry:15
 
-    class A1,A2,B1,B2,C1,C2,C3,D1,D2,E1,E2,F1 defaultStyle
+    class O1,A1,A2,B1,B2,C1,C2,C3,D1,D2,E1,E2,F1 defaultStyle
 
+    style オーケストレーション層 rx:15,ry:15
+    style DockerCompose rx:15,ry:15,fill:#2d3748
     style データ収集層 rx:15,ry:15
     style ETL処理層 rx:15,ry:15
     style データ基盤層GCP rx:15,ry:15
@@ -121,11 +130,11 @@ graph TB
 |---------|------|
 | **言語** | Python 3.12 |
 | **機械学習** | XGBoost, scikit-learn |
-| **データ処理** | pandas, numpy |
+| **データ処理** | pandas, numpy, dbt |
 | **クラウド** | Google Cloud Platform (BigQuery, Cloud Storage) |
+| **ワークフロー** | Apache Airflow, Docker Compose |
 | **BI/可視化** | Looker Studio |
 | **API** | 東京電力API, Open-Meteo API |
-| **その他** | requests |
 
 ## 予測精度と成果
 
@@ -145,9 +154,12 @@ graph TB
 
 2. **完全自動化パイプライン**
    - データ収集からBigQuery投入まで完全自動化
-   - cron + Pythonスクリプトにより日次自動実行を実現
+   - Apache Airflow + Docker Composeによる日次自動実行
+   - dbtによるデータ変換・データマート作成
    - 失敗時はリトライ処理を実装し、BigQueryログ経由で監視可能
    - システム監視とアラート
+
+   ![Airflow DAG Graph](docs/images/airflow_dag_graph.png)
 
 3. **データ可視化・BI実装**
    - Looker Studioダッシュボードを設計・実装
@@ -174,38 +186,51 @@ graph TB
 ## プロジェクト構成
 
 ```
-energy-env/
+energy-prediction-pipeline/
+├── dags/
+│   └── energy_etl_dag.py          # Airflow DAG定義
+├── dbt_energy/
+│   ├── models/
+│   │   ├── marts/
+│   │   │   ├── ml_features.sql    # ML特徴量テーブル
+│   │   │   └── dashboard_data.sql # ダッシュボード用テーブル
+│   │   └── staging/
+│   │       └── sources.yml        # ソーステーブル定義
+│   ├── dbt_project.yml            # dbtプロジェクト設定
+│   └── profiles.yml               # BigQuery接続設定
 ├── src/
-│   ├── data_processing/          # データ収集・処理
-│   │   ├── data_downloader.py    # 東京電力APIからデータ取得
-│   │   ├── weather_downloader.py # 気象データ取得
+│   ├── data_processing/           # データ収集・処理
+│   │   ├── data_downloader.py     # 東京電力APIからデータ取得
+│   │   ├── weather_downloader.py  # 気象データ取得
 │   │   ├── weather_bigquery_loader.py # 気象データBigQuery投入
 │   │   ├── power_bigquery_loader.py   # 電力データBigQuery投入
-│   │   ├── ml_features_updater.py     # ML用特徴量生成・更新
-│   │   ├── dashboard_data_updater.py  # ダッシュボード用データ更新
+│   │   ├── dbt_runner.py          # dbt実行モジュール
 │   │   ├── prediction_accuracy_updater.py # 予測精度検証データ更新
 │   │   └── system_status_updater.py   # システムステータス更新
 │   ├── pipelines/
-│   │   └── main_etl.py           # 統合ETLパイプライン
+│   │   └── main_etl.py            # 統合ETLパイプライン
 │   ├── prediction/
 │   │   └── prediction_iterative_with_export.py # 段階的予測実行
 │   ├── monitoring/
 │   │   └── data_quality_checker.py # データ品質チェック
 │   └── utils/
-│       └── logging_config.py      # ログ設定
-├── sql/                           # BigQueryテーブル定義
-├── scripts/                       # 運用スクリプト
-├── requirements.txt               # Python依存パッケージ
-└── SETUP.md                       # セットアップ手順
+│       └── logging_config.py       # ログ設定
+├── docker-compose.yml              # Airflow環境定義
+├── Dockerfile                      # パイプライン用コンテナ
+├── sql/                            # BigQueryテーブル定義
+├── scripts/                        # 運用スクリプト
+├── requirements.txt                # Python依存パッケージ
+└── SETUP.md                        # セットアップ手順
 ```
 
 ## セットアップ
 
 ### 前提条件
 
-- Python 3.12以上
+- Docker / Docker Compose
 - Google Cloud Platformアカウント
 - BigQueryプロジェクト
+- GCPサービスアカウントキー
 
 ### インストール手順
 
@@ -215,31 +240,25 @@ git clone https://github.com/yourusername/energy-data-platform.git
 cd energy-data-platform
 ```
 
-2. **仮想環境の作成と有効化**
+2. **GCPサービスアカウントキーの配置**
 ```bash
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# Linux/Mac
-source venv/bin/activate
+# keys/ディレクトリにサービスアカウントキーを配置
+cp /path/to/service-account-key.json keys/
 ```
 
-3. **依存パッケージのインストール**
+3. **環境変数の設定**
 ```bash
-pip install -r requirements.txt
-```
-
-4. **環境変数の設定**
-```bash
-# .envファイルを作成（.env.templateを参考に）
+# .envファイルを作成
 cp .env.template .env
 
 # 必要な環境変数を設定
-ENERGY_ENV_PATH=/path/to/energy-env
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
 GCP_PROJECT_ID=your-project-id
+GOOGLE_APPLICATION_CREDENTIALS=/app/keys/service-account-key.json
+```
+
+4. **Dockerイメージのビルドと起動**
+```bash
+docker compose up -d
 ```
 
 5. **BigQueryテーブルの作成**
@@ -251,28 +270,24 @@ GCP_PROJECT_ID=your-project-id
 
 ## 使用方法
 
-### 日次データ収集と予測実行
+### Docker + Airflow環境での実行（推奨）
 
 ```bash
-# 仮想環境の有効化
-# Windows
-venv\Scripts\activate
+# Airflow環境の起動
+docker compose up -d
 
-# Linux/Mac
-source venv/bin/activate
-
-# データ収集（過去7日分）
-python -m src.pipelines.main_etl --days 7
-
-# 予測実行（14日間予測 + CSV出力）
-python -m src.prediction.prediction_iterative_with_export
+# Airflow UI（http://localhost:8081）でDAGを確認・実行
+# DAG: energy_etl_pipeline（毎日7:00 JST自動実行）
 ```
 
-### データ品質チェック
+### 手動実行（Docker内）
 
 ```bash
-# ML特徴量の欠損値チェック
-python -m src.utils.check_ml_features_missing
+# データ収集（過去7日分）
+docker compose run --rm energy-pipeline python -m src.pipelines.main_etl --days 7
+
+# 予測実行（14日間予測 + CSV出力）
+docker compose run --rm energy-pipeline python -m src.prediction.prediction_iterative_with_export
 ```
 
 ## 開発プロセス
@@ -288,7 +303,7 @@ python -m src.utils.check_ml_features_missing
 | **Phase 8** | モデル評価・改善 | 評価指標深層理解、残差分析 |
 | **Phase 9** | 品質向上 | 12特徴量に絞り込み、MAPE 2.15%達成 |
 | **Phase 10** | 自動化システム | 日次自動予測、土日祝日対応 |
-| **Phase 11** | 監視・可視化 | Looker Studio、7プロセス監視 |
+| **Phase 11** | 監視・可視化・自動化 | Looker Studio、Apache Airflow、Docker、dbt |
 
 ## 技術的ハイライト
 
@@ -363,14 +378,27 @@ predict(11月8日) → 10月26日から11月7日の予測値を使って予測
 
 各プロセスの実行状態、所要時間、エラー情報をLooker Studioで可視化しています。
 
+### 5. ワークフロー管理
+
+**Apache Airflow + Docker Compose構成**:
+- DockerOperatorによるコンテナベースのタスク実行
+- タスク依存関係の明示的な定義（並列実行・直列実行の制御）
+- 日次スケジュール実行（毎朝7:00 JST）
+- Web UIによるDAG監視・手動実行
+
+**dbtによるデータ変換**:
+- SQLベースのデータマート作成（ml_features、dashboard_data）
+- ソーステーブル定義とスキーマ管理
+- Airflow DAGとの統合
+
 ## 今後の展望
 
-- Apache Airflowによるワークフロー管理・スケジューリング
-- Web UIでのパイプライン監視・制御機能
+- 予測精度向上（土日祝日パターンの改善）
 
 ## スキルセット
 - データ収集～基盤構築～BI可視化まで一気通貫で対応
-- データエンジニアリング（ETL、データパイプライン、BigQuery、データマート作成）
+- データエンジニアリング（ETL、データパイプライン、BigQuery、dbt、データマート作成）
+- ワークフロー管理（Apache Airflow、Docker Compose）
 - 機械学習（XGBoost、特徴量エンジニアリング、時系列予測）
 - Google Cloud Platform（BigQuery、Cloud Storage、Looker Studio）
 - Python開発（pandas、numpy、scikit-learn）

@@ -1,10 +1,16 @@
 # 機密情報
-keys/
+keys/*
+!keys/.gitkeep
 credentials/
 .env
 *.pem
 *.key
 *_key.json
+
+# 職務経歴書（個人情報）
+learning_memos/職務経歴書.md
+learning_memos/職務経歴書.docx
+~$*.docx
 
 # Python関連
 __pycache__/

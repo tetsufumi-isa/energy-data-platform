@@ -211,10 +211,10 @@ class PredictionAccuracyUpdater:
         print(f"prediction_accuracy更新開始: execution_id={execution_id}")
 
         try:
-            # 1. 過去7日分のデータ削除
+            # 1. 過去14日分のデータ削除
             deleted_rows = self.delete_recent_data()
 
-            # 2. 過去7日分のデータを再投入
+            # 2. 過去14日分のデータを再投入
             inserted_rows = self.insert_prediction_accuracy()
 
             print(f"prediction_accuracy更新完了（過去14日分）: 削除{deleted_rows}行, 挿入{inserted_rows}行")

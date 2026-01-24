@@ -1,18 +1,19 @@
-# Energy Environment セットアップガイド
+# Energy Data Platform セットアップガイド
 
-このドキュメントは、Linuxサーバー環境でのセットアップ手順を説明します。
+このドキュメントは、Docker + Airflow環境でのセットアップ手順を説明します。
 
-## 📋 前提条件
+## 前提条件
 
 ### システム要件
-- **OS**: Linux（Ubuntu 20.04以降推奨）
-- **Python**: 3.10以上（3.12推奨）
+- **OS**: Linux（Ubuntu 20.04以降推奨）/ macOS / Windows（WSL2）
+- **Docker**: 20.10以上
+- **Docker Compose**: V2以上
 - **Git**: インストール済み
-- **インターネット接続**: PyPI・GCP APIへのアクセスが必要
+- **インターネット接続**: Docker Hub・GCP APIへのアクセスが必要
 
 ### GCP要件
 - **GCPプロジェクト**: 既存のプロジェクトが必要
-- **BigQuery**: データセット `prod_energy_data` が作成済み
+- **BigQuery**: データセット `energy_data` が作成済み
 - **サービスアカウント**: 以下の権限を持つサービスアカウントキー（JSON）
   - BigQuery データ編集者
   - BigQuery ジョブユーザー
@@ -20,181 +21,121 @@
 
 ---
 
-## 🚀 セットアップ手順
+## セットアップ手順
 
 ### 1. リポジトリクローン
 
 ```bash
-# ホームディレクトリに移動
-cd ~
-
-# リポジトリクローン
-git clone <repository-url> energy-env
-cd energy-env
+git clone https://github.com/yourusername/energy-data-platform.git
+cd energy-data-platform
 ```
 
-### 2. 自動セットアップスクリプト実行
+### 2. GCP認証キー配置
 
 ```bash
-# setup.shに実行権限付与
-chmod +x setup.sh
-
-# セットアップスクリプト実行
-bash setup.sh
-```
-
-**スクリプトの処理内容:**
-1. Pythonバージョン確認
-2. 仮想環境作成 (`venv/`)
-3. 仮想環境アクティベート
-4. pipアップグレード
-5. requirements.txtからパッケージインストール
-6. `.env`ファイル作成（`.env.template`からコピー）
-7. 必要なディレクトリ構造作成
-8. `ENERGY_ENV_PATH`の自動設定
-
-### 3. GCP認証キー配置
-
-```bash
-# credentialsディレクトリにサービスアカウントキーを配置
-# 例: scp経由でアップロード
-scp /path/to/local/service-account-key.json username@server:~/energy-env/credentials/
+# keys/ディレクトリにサービスアカウントキーを配置
+cp /path/to/service-account-key.json keys/
 
 # パーミッション設定（重要）
-chmod 600 ~/energy-env/credentials/service-account-key.json
+chmod 600 keys/service-account-key.json
 ```
 
-### 4. 環境変数設定
-
-`.env`ファイルを編集して、GCP認証キーのパスを設定：
+### 3. 環境変数設定
 
 ```bash
+# .envファイルを作成
+cp .env.template .env
+
+# .envファイルを編集
 nano .env
 ```
 
 **編集内容:**
 ```bash
-# プロジェクトルートパス（setup.shで自動設定済み）
-ENERGY_ENV_PATH=/home/username/energy-env
-
-# GCP認証キーファイルのパス（要編集）
-GOOGLE_APPLICATION_CREDENTIALS=/home/username/energy-env/credentials/service-account-key.json
+GCP_PROJECT_ID=your-project-id
+GOOGLE_APPLICATION_CREDENTIALS=/app/keys/service-account-key.json
 ```
 
-保存して終了（Ctrl+X → Y → Enter）
-
-### 5. 環境変数読み込み
+### 4. Dockerイメージのビルドと起動
 
 ```bash
-# 環境変数を現在のシェルに読み込み
-export $(cat .env | grep -v '^#' | xargs)
+# イメージビルド＆起動
+docker compose up -d --build
 
-# 確認
-echo $ENERGY_ENV_PATH
-echo $GOOGLE_APPLICATION_CREDENTIALS
+# 起動確認
+docker compose ps
 ```
+
+**期待される出力:**
+```
+NAME                    STATUS
+airflow-webserver       Up (healthy)
+airflow-scheduler       Up (healthy)
+postgres                Up (healthy)
+```
+
+### 5. Airflow UIアクセス
+
+ブラウザで以下にアクセス：
+- **URL**: http://localhost:8081
+- **ユーザー名**: airflow
+- **パスワード**: airflow
 
 ### 6. 動作確認
 
-#### 6.1 仮想環境アクティベート確認
+#### 6.1 DAG確認
+Airflow UIで `energy_etl_pipeline` DAGが表示されることを確認。
 
+#### 6.2 手動実行テスト
 ```bash
-# 仮想環境アクティベート
-source venv/bin/activate
-
-# Pythonバージョン確認
-python --version  # Python 3.10以上であることを確認
-
-# インストール済みパッケージ確認
-pip list | grep google-cloud
-```
-
-#### 6.2 GCP接続テスト
-
-```bash
-# BigQuery・GCS接続確認
-python -m src.data_processing.gcp_auth
+# データ収集テスト（過去1日分）
+docker compose run --rm energy-pipeline python -m src.pipelines.main_etl --days 1
 ```
 
 **期待される出力:**
 ```
-認証キーのパス: /home/username/energy-env/credentials/service-account-key.json
-GCS接続成功: X個のバケットが見つかりました
- - bucket-name-1
- - bucket-name-2
-BigQuery接続成功: X個のデータセットが見つかりました
- - prod_energy_data
-すべての接続テストに成功しました！
-```
-
-#### 6.3 データダウンロードテスト
-
-```bash
-# 過去1日分のデータダウンロードテスト
-python -m src.data_processing.data_downloader --days 1
-```
-
-**期待される出力:**
-```
-PowerDataDownloader 初期化完了 保存先: /home/username/energy-env/data/raw
-東京電力でんき予報データダウンロード開始
-日数指定モード: 過去1日分
+電力データダウンロード開始
 ...
-成功: YYYYMM
-ダウンロード完了
+処理完了
 ```
 
 ---
 
-## 🔄 日次処理の設定（cron）
+## 日次処理について
 
-### cron設定例
+### Airflowによる自動実行
 
-```bash
-# crontab編集
-crontab -e
-```
+DAGスケジュール設定：
+- **DAG名**: energy_etl_pipeline
+- **実行時刻**: 毎日 07:00 JST
+- **タスク**: データ収集 → BigQuery投入 → dbt変換 → 予測実行
 
-**設定内容:**
-```bash
-# 環境変数の設定
-ENERGY_ENV_PATH=/home/username/energy-env
-GOOGLE_APPLICATION_CREDENTIALS=/home/username/energy-env/credentials/service-account-key.json
-
-# 毎日午前3時に電力データダウンロード・BQ投入
-0 3 * * * cd $ENERGY_ENV_PATH && source venv/bin/activate && python -m src.pipelines.main_etl --days 7 >> logs/cron_etl.log 2>&1
-
-# 毎日午前4時に天気データダウンロード（必要に応じて）
-0 4 * * * cd $ENERGY_ENV_PATH && source venv/bin/activate && python -m src.data_processing.weather_downloader --days 7 >> logs/cron_weather.log 2>&1
-```
-
-### cronログ確認
+### 手動実行
 
 ```bash
-# ETLログ確認
-tail -f ~/energy-env/logs/cron_etl.log
-
-# 天気データログ確認
-tail -f ~/energy-env/logs/cron_weather.log
+# Airflow UIから手動トリガー
+# または、Docker内で直接実行
+docker compose run --rm energy-pipeline python -m src.pipelines.main_etl --days 7
 ```
 
 ---
 
-## 🔧 トラブルシューティング
+## トラブルシューティング
 
-### 1. Python仮想環境が見つからない
+### 1. コンテナが起動しない
 
 **症状:**
 ```
-bash: venv/bin/activate: No such file or directory
+Container airflow-scheduler is not healthy
 ```
 
 **対処法:**
 ```bash
-# 仮想環境再作成
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# ログ確認
+docker compose logs airflow-scheduler
+
+# 再起動
+docker compose down && docker compose up -d
 ```
 
 ### 2. GCP認証エラー
@@ -206,14 +147,11 @@ google.auth.exceptions.DefaultCredentialsError
 
 **対処法:**
 ```bash
-# 環境変数が設定されているか確認
-echo $GOOGLE_APPLICATION_CREDENTIALS
+# キーファイルが正しく配置されているか確認
+ls -la keys/
 
-# 認証キーファイルが存在するか確認
-ls -la $GOOGLE_APPLICATION_CREDENTIALS
-
-# パーミッション確認
-chmod 600 $GOOGLE_APPLICATION_CREDENTIALS
+# .envの設定確認
+cat .env | grep GOOGLE
 ```
 
 ### 3. BigQueryテーブルが見つからない
@@ -225,64 +163,44 @@ google.api_core.exceptions.NotFound: 404 Table not found
 
 **対処法:**
 ```bash
-# BigQueryコンソールで以下を確認
-# - プロジェクトID: energy-env
-# - データセット: prod_energy_data
-# - テーブル: energy_data_hourly, weather_data_hourly など
-
-# テーブルスキーマ作成スクリプトを実行（必要に応じて）
+# sql/ディレクトリ内のSQLでテーブル作成
+# BigQueryコンソールで実行
 ```
 
-### 4. パッケージインストールエラー
-
-**症状:**
-```
-ERROR: Could not find a version that satisfies the requirement
-```
-
-**対処法:**
-```bash
-# pipアップグレード
-pip install --upgrade pip
-
-# 個別インストール
-pip install google-cloud-bigquery google-cloud-storage pandas xgboost
-```
-
-### 5. cronジョブが実行されない
+### 4. Airflow UIにアクセスできない
 
 **確認項目:**
 ```bash
-# cronサービス稼働確認
-systemctl status cron
+# ポート確認
+docker compose ps
 
-# crontab確認
-crontab -l
-
-# ログ確認
-grep CRON /var/log/syslog
+# webserverログ確認
+docker compose logs airflow-webserver
 ```
 
 ---
 
-## 📂 ディレクトリ構造
-
-セットアップ完了後のディレクトリ構成：
+## ディレクトリ構造
 
 ```
-energy-env/
+energy-data-platform/
 ├── .env                      # 環境変数（Gitで除外）
 ├── .env.template             # 環境変数テンプレート
-├── .gitignore                # Git除外設定
+├── docker-compose.yml        # Docker Compose設定
+├── Dockerfile                # パイプライン用イメージ
 ├── requirements.txt          # Pythonパッケージリスト
-├── setup.sh                  # セットアップスクリプト
 ├── SETUP.md                  # このファイル
-├── CLAUDE.md                 # Claude Code向けプロジェクト説明
 │
-├── venv/                     # Python仮想環境（Gitで除外）
-│
-├── credentials/              # GCP認証キー（Gitで除外）
+├── keys/                     # GCP認証キー（Gitで除外）
 │   └── service-account-key.json
+│
+├── dags/                     # Airflow DAG定義
+│   └── energy_etl_dag.py
+│
+├── dbt_energy/               # dbtプロジェクト
+│   ├── models/
+│   ├── dbt_project.yml
+│   └── profiles.yml
 │
 ├── src/                      # ソースコード
 │   ├── data_processing/
@@ -290,91 +208,72 @@ energy-env/
 │   ├── pipelines/
 │   └── utils/
 │
-├── data/                     # データファイル（Gitで除外）
-│   ├── raw/
-│   └── weather/
+├── sql/                      # BigQueryテーブル定義SQL
 │
 ├── logs/                     # ログファイル（Gitで除外）
-│   ├── tepco_api/
-│   ├── weather_api/
-│   ├── power_bq_loader/
-│   ├── weather_bq_loader/
-│   └── prediction/
 │
-├── output/                   # 出力ファイル（Gitで除外）
-│
-└── learning_memos/           # 学習メモ・進捗記録
+└── output/                   # 出力ファイル（Gitで除外）
 ```
 
 ---
 
-## 🔐 セキュリティ注意事項
+## セキュリティ注意事項
 
 1. **認証キーの管理**
    - サービスアカウントキーは絶対にGitにコミットしない
-   - `.gitignore`で`credentials/`ディレクトリを除外済み
+   - `.gitignore`で`keys/`ディレクトリを除外済み
    - ファイルパーミッションは`600`に設定
 
 2. **環境変数の管理**
    - `.env`ファイルはGitで除外
    - `.env.template`のみバージョン管理
 
-3. **サーバーアクセス**
-   - SSH鍵認証を使用
-   - 不要なポートは閉じる
+3. **Airflow認証**
+   - 本番環境ではデフォルトパスワードを変更すること
 
 ---
 
-## 📝 追加設定（オプション）
-
-### シェル起動時に環境変数を自動読み込み
-
-`.bashrc`または`.zshrc`に追加：
+## コマンドリファレンス
 
 ```bash
-# Energy Environment
-if [ -f "$HOME/energy-env/.env" ]; then
-    export $(cat $HOME/energy-env/.env | grep -v '^#' | xargs)
-fi
-```
+# 起動
+docker compose up -d
 
-### エイリアス設定
+# 停止
+docker compose down
 
-```bash
-# .bashrcまたは.zshrcに追加
-alias energy-activate='cd ~/energy-env && source venv/bin/activate'
-alias energy-logs='tail -f ~/energy-env/logs/cron_etl.log'
+# ログ確認
+docker compose logs -f
+
+# 特定サービスのログ
+docker compose logs -f airflow-scheduler
+
+# コンテナ内でコマンド実行
+docker compose run --rm energy-pipeline python -m src.pipelines.main_etl --days 7
+
+# イメージ再ビルド
+docker compose build --no-cache
+
+# 全リソース削除（データ含む）
+docker compose down -v
 ```
 
 ---
 
-## 🆘 サポート
-
-問題が解決しない場合は、以下を確認：
-
-1. **ログファイル確認**: `logs/`ディレクトリ内の各種ログ
-2. **BigQueryログ確認**: `prod_energy_data.process_execution_log`テーブル
-3. **環境変数確認**: `env | grep ENERGY`
-
----
-
-## ✅ チェックリスト
+## チェックリスト
 
 セットアップ完了前に以下を確認：
 
-- [ ] Pythonバージョン確認（3.10以上）
-- [ ] 仮想環境作成・アクティベート
-- [ ] パッケージインストール完了
-- [ ] `.env`ファイル作成・編集完了
+- [ ] Docker / Docker Composeインストール完了
+- [ ] リポジトリクローン完了
 - [ ] GCP認証キー配置完了（パーミッション600）
-- [ ] 環境変数読み込み完了
-- [ ] GCP接続テスト成功
-- [ ] データダウンロードテスト成功
-- [ ] cron設定完了（日次処理用）
-- [ ] ログファイル確認
+- [ ] `.env`ファイル作成・編集完了
+- [ ] `docker compose up -d`で全コンテナ起動
+- [ ] Airflow UI（http://localhost:8081）にアクセス可能
+- [ ] DAG `energy_etl_pipeline`が表示される
+- [ ] 手動実行テスト成功
 
 ---
 
-**最終更新**: 2025-10-11
-**対象環境**: Linux (Ubuntu 20.04+)
-**Python**: 3.12推奨
+**最終更新**: 2026-01-24
+**対象環境**: Docker + Airflow

@@ -1,0 +1,84 @@
+version: 2
+
+models:
+  - name: ml_features
+    description: "機械学習用特徴量テーブル。電力・天気・カレンダーデータを統合し、lag特徴量を計算"
+    columns:
+      - name: date
+        description: "日付"
+        tests:
+          - not_null
+      - name: hour
+        description: "時間（0-23）"
+        tests:
+          - not_null
+      - name: actual_power
+        description: "実績電力使用量"
+      - name: supply_capacity
+        description: "供給容量"
+      - name: temperature_2m
+        description: "気温（2m）"
+      - name: relative_humidity_2m
+        description: "相対湿度（2m）"
+      - name: precipitation
+        description: "降水量"
+      - name: weather_code
+        description: "天気コード"
+      - name: day_of_week
+        description: "曜日（英語）"
+      - name: is_weekend
+        description: "週末フラグ"
+      - name: is_holiday
+        description: "祝日フラグ"
+      - name: month
+        description: "月"
+      - name: hour_sin
+        description: "時間のsin変換（周期性）"
+      - name: hour_cos
+        description: "時間のcos変換（周期性）"
+      - name: lag_1_day
+        description: "1日前の電力使用量"
+      - name: lag_7_day
+        description: "7日前の電力使用量"
+      - name: lag_1_business_day
+        description: "1営業日前の電力使用量"
+
+  - name: dashboard_data
+    description: "Looker Studio用ダッシュボードデータ。電力・天気・予測データを統合"
+    columns:
+      - name: date
+        description: "日付"
+        tests:
+          - not_null
+      - name: hour
+        description: "時間（0-23）"
+        tests:
+          - not_null
+      - name: actual_power
+        description: "実績電力使用量"
+      - name: supply_capacity
+        description: "供給容量"
+      - name: predicted_power
+        description: "予測電力使用量"
+      - name: error_absolute
+        description: "絶対誤差"
+      - name: error_percentage
+        description: "誤差率（%）"
+      - name: temperature_2m
+        description: "気温（2m）"
+      - name: relative_humidity_2m
+        description: "相対湿度（2m）"
+      - name: precipitation
+        description: "降水量"
+      - name: weather_code
+        description: "天気コード"
+      - name: day_of_week
+        description: "曜日（英語）"
+      - name: is_weekend
+        description: "週末フラグ"
+      - name: is_holiday
+        description: "祝日フラグ"
+      - name: usage_rate
+        description: "使用率（%）"
+      - name: weekday_jp
+        description: "曜日（日本語）"

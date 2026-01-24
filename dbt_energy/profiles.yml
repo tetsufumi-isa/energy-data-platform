@@ -1,0 +1,12 @@
+dbt_energy:
+  target: prod
+  outputs:
+    prod:
+      type: bigquery
+      method: service-account
+      project: energy-env
+      dataset: prod_energy_data
+      location: us-central1
+      threads: 4
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
+      timeout_seconds: 300

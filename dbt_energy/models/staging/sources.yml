@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  - name: energy_data
+    database: energy-env
+    schema: prod_energy_data
+    tables:
+      - name: energy_data_hourly
+        description: "1時間ごとの電力使用量・供給容量"
+      - name: weather_data
+        description: "天気データ（気温・湿度・降水量など）"
+      - name: calendar_data
+        description: "カレンダーデータ（曜日・休日フラグ）"
+      - name: date_lag_mapping
+        description: "日付ラグマッピング（lag特徴量計算用）"
+      - name: prediction_results
+        description: "予測結果（予測日・予測値）"
